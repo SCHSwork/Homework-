@@ -63,6 +63,16 @@ th,td{text-align:left;padding:8px 6px;border-top:1px solid var(--line)}
 th{color:var(--muted);font-weight:500;font-size:12px;border-top:0}
 td.n{text-align:right;font-variant-numeric:tabular-nums}
 .empty{color:var(--muted);font-size:13px;padding:6px 0}
+.days{display:flex;gap:1px;height:26px;margin:4px 0 2px}
+.days i{flex:1;border-radius:2px;background:var(--line)}
+.days i.ok{background:var(--ok)}.days i.warn{background:var(--warn)}.days i.bad{background:var(--bad)}
+.dayrow{padding:8px 0;border-top:1px solid var(--line)}.dayrow:first-child{border-top:0}
+.dayrow .top{display:flex;justify-content:space-between;font-size:14px}
+.dayrow .ends{display:flex;justify-content:space-between;font-size:11px;color:var(--muted)}
+h3.sec{font-size:13px;color:var(--muted);font-weight:600;margin:18px 0 6px;text-transform:uppercase;letter-spacing:.04em}
+.axis{font-size:11px;fill:var(--muted)}
+.setup{border:1px dashed var(--line);border-radius:12px;padding:12px 14px;font-size:14px}
+.setup code{font-size:12px}
 .hchart{width:100%;height:140px;display:block;margin-top:10px}
 .legend{display:flex;gap:14px;font-size:12px;color:var(--muted);margin-top:6px}
 .legend span{display:flex;align-items:center;gap:6px}
@@ -87,6 +97,12 @@ td.n{text-align:right;font-variant-numeric:tabular-nums}
   <section>
     <h2>Services <span class="controls"><span class="sub" id="nextCheck"></span><button class="ghost" id="recheck">Check now</button></span></h2>
     <div id="services"></div>
+  </section>
+
+  <section>
+    <h2>Long-term history <span class="controls"><select id="srcSel"><option value="server">Server monitor (every 10 min)</option><option value="browser">This browser</option></select></span></h2>
+    <div class="sub" id="srcInfo"></div>
+    <div id="longterm"><div class="empty">Loading…</div></div>
   </section>
 
   <section>
@@ -133,8 +149,8 @@ td.n{text-align:right;font-variant-numeric:tabular-nums}
   </section>
 
   <section>
-    <h2>Data <span class="controls"><button class="ghost" id="exportBtn">Export JSON</button><button class="ghost" id="resetBtn">Reset all</button></span></h2>
-    <div class="sub">History is kept in this browser only (last ~24 hours of checks, 20 benchmark runs, 50 incidents).</div>
+    <h2>Data <span class="controls"><button class="ghost" id="exportBtn">Export JSON</button><button class="ghost" id="importBtn">Import</button><input type="file" id="importFile" accept=".json" hidden><button class="ghost" id="resetBtn">Reset all</button></span></h2>
+    <div class="sub">The server monitor saves every check to the <code>status-data</code> branch of this repo, forever (raw checks for 7 days, daily summaries after that). This browser also keeps its own copy: the last 24 hours of checks in full, daily summaries forever, up to 1000 incidents and 500 benchmark runs.</div>
   </section>
 
   <div class="sub" style="text-align:center">Checks run in your browser from your network, so a "down" result can also mean your network blocks that host.</div>
@@ -182,6 +198,7 @@ async function timedFetch(url, opts = {}) {
 /* ---------- Services ---------- */
 const uptime = h => h.length ? h.filter(p => p.s !== "bad").length / h.length * 100 : null;
 const upColor = u => u == null ? "var(--muted)" : u >= 99 ? "var(--ok)" : u >= 95 ? "var(--warn)" : "var(--bad)";
+const dayKey = t => new Date(t).toISOString().slice(0, 10);
 const esc = t => String(t ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
 const fmtTime = t => new Date(t).toLocaleString([], { month:"short", day:"numeric", hour:"numeric", minute:"2-digit" });
 const dur = ms => { const m = Math.round(ms / 60000); return m < 1 ? "<1 min" : m < 60 ? m + " min" : (m / 60).toFixed(1) + " h"; };
@@ -215,11 +232,24 @@ async function checkAll() {
   $("#recheck").disabled = true;
   const results = await Promise.all(SERVICES.map(checkOne));
   const hist = store.get("gn-status-hist", {});
-  SERVICES.forEach((s, i) => { (hist[s.id] ||= []).push({ ...results[i], t: Date.now() }); hist[s.id] = hist[s.id].slice(-HIST_MAX); });
+  const daily = store.get("gn-daily", {});
+  SERVICES.forEach((s, i) => {
+    (hist[s.id] ||= []).push({ ...results[i], t: Date.now() });
+    const drop = hist[s.id].slice(0, Math.max(0, hist[s.id].length - HIST_MAX));
+    drop.forEach(p => {
+      const d = dayKey(p.t), r = ((daily[d] ||= {})[s.id] ||= { n: 0, up: 0, slow: 0, sum: 0, min: null, max: null });
+      r.n++; if (p.s !== "bad") { r.up++; r.sum += p.ms; r.min = r.min == null ? p.ms : Math.min(r.min, p.ms); r.max = Math.max(r.max ?? 0, p.ms); }
+      if (p.s === "warn") r.slow++;
+      r.avg = r.up ? Math.round(r.sum / r.up) : null;
+    });
+    hist[s.id] = hist[s.id].slice(-HIST_MAX);
+  });
+  store.set("gn-daily", daily);
   store.set("gn-status-hist", hist);
   trackIncidents(results);
   renderServices();
   renderKpis(hist);
+  if ($("#srcSel").value === "browser") renderLongterm();
 
   const bad = results.filter(r => r.s === "bad").length, slow = results.filter(r => r.s === "warn").length;
   const siteDown = results[0].s === "bad" || results[1].s === "bad";
@@ -270,7 +300,7 @@ function trackIncidents(results) {
     if (r.s === "bad" && !open) inc.push({ id: s.id, name: s.name, start: Date.now(), why: r.e });
     if (r.s !== "bad" && open) open.end = Date.now();
   });
-  store.set("gn-incidents", inc.slice(-50));
+  store.set("gn-incidents", inc.slice(-1000));
   renderIncidents();
 }
 function renderIncidents() {
@@ -281,6 +311,167 @@ function renderIncidents() {
     : `<div class="empty">No outages recorded. Nice.</div>`;
 }
 $("#clearInc").onclick = () => { store.set("gn-incidents", store.get("gn-incidents", []).filter(i => !i.end)); renderIncidents(); renderKpis(store.get("gn-status-hist", {})); };
+
+/* ---------- Long-term history ---------- */
+const DATA_URL = "https://raw.githubusercontent.com/SCHSwork/Homework-/status-data/";
+let server = null, serverErr = null;
+async function loadServer() {
+  try {
+    const get = f => fetch(DATA_URL + f + "?_=" + Math.floor(Date.now() / 300000), { cache: "no-store" }).then(r => r.ok ? r.json() : Promise.reject(r.status));
+    const [raw, daily, incidents, library, meta] = await Promise.all(["raw.json", "daily.json", "incidents.json", "library.json", "meta.json"].map(get));
+    const STATE = ["ok", "warn", "bad"];
+    const series = {};
+    for (const [t, row] of raw.checks) for (const [id, [st, ms]] of Object.entries(row)) (series[id] ||= []).push({ t, s: STATE[st], ms });
+    server = { series, daily, incidents, library, since: meta.first, last: meta.last, runs: meta.runs };
+  } catch (e) { serverErr = e === 404 ? "not set up yet" : "couldn't load"; }
+}
+function browserModel() {
+  const series = store.get("gn-status-hist", {}), daily = JSON.parse(JSON.stringify(store.get("gn-daily", {})));
+  // Fold the full-detail last 24h into daily so "all time" includes it.
+  for (const [id, pts] of Object.entries(series)) for (const p of pts) {
+    const r = ((daily[dayKey(p.t)] ||= {})[id] ||= { n: 0, up: 0, slow: 0, sum: 0, min: null, max: null, _live: true });
+    if (!r._live) continue;
+    r.n++; if (p.s !== "bad") { r.up++; r.sum += p.ms; r.min = r.min == null ? p.ms : Math.min(r.min, p.ms); r.max = Math.max(r.max ?? 0, p.ms); }
+    if (p.s === "warn") r.slow++; r.avg = r.up ? Math.round(r.sum / r.up) : null;
+  }
+  const all = Object.values(series).flat();
+  return { series, daily, incidents: store.get("gn-incidents", []), library: store.get("gn-lib-hist", {}),
+           since: all.length ? Math.min(...all.map(p => p.t), ...Object.keys(daily).map(d => Date.parse(d))) : null, last: all.length ? Math.max(...all.map(p => p.t)) : null };
+}
+const pctl = (arr, f) => { if (!arr.length) return null; const s = [...arr].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor(f * s.length))]; };
+const upPct = (n, up) => n ? up / n * 100 : null;
+const fmtPct = u => u == null ? "–" : (u >= 99.995 ? "100" : u.toFixed(2)) + "%";
+function windowUptime(m, id, days) {
+  const cut = Date.now() - days * 864e5;
+  if (days <= 7) { const pts = (m.series[id] || []).filter(p => p.t >= cut); if (pts.length) return upPct(pts.length, pts.filter(p => p.s !== "bad").length); }
+  let n = 0, up = 0;
+  for (const [d, row] of Object.entries(m.daily)) if (Date.parse(d) >= cut - 864e5 && row[id]) { n += row[id].n; up += row[id].up; }
+  return upPct(n, up);
+}
+function downtime(incs, id, days) {
+  const cut = Date.now() - days * 864e5;
+  return incs.filter(i => !id || i.id === id).reduce((a, i) => a + Math.max(0, (i.end || Date.now()) - Math.max(i.start, cut)), 0);
+}
+function lineChart(lines, opts = {}) {
+  const W = Math.max(300, Math.min(900, $("#longterm").clientWidth || 640)), H = opts.h || 160, L = 44, B = 18, T = 6;
+  const all = lines.flatMap(l => l.pts.map(p => p.y)).filter(v => v != null);
+  if (!all.length) return `<div class="empty">Not enough data yet.</div>`;
+  const xs = lines.flatMap(l => l.pts.map(p => p.x)), x0 = Math.min(...xs), x1 = Math.max(...xs);
+  const ymin = opts.zero === false ? Math.min(...all) * 0.98 : 0, ymax = Math.max(...all) * 1.05 || 1;
+  const X = x => L + (x1 === x0 ? (W - L) / 2 : (x - x0) / (x1 - x0) * (W - L - 4)), Y = y => T + (1 - (y - ymin) / (ymax - ymin)) * (H - T - B);
+  const fmt = opts.fmt || (v => Math.round(v));
+  const grid = [0, .5, 1].map(f => { const v = ymin + f * (ymax - ymin); return `<line x1="${L}" x2="${W}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)"/><text class="axis" x="${L - 6}" y="${Y(v) + 4}" text-anchor="end">${fmt(v)}</text>`; }).join("");
+  const xl = [x0, x1].map((x, i) => `<text class="axis" x="${X(x)}" y="${H - 4}" text-anchor="${i ? "end" : "start"}">${opts.xfmt ? opts.xfmt(x) : x}</text>`).join("");
+  const paths = lines.map(l => {
+    let d = "", pen = false;
+    for (const p of l.pts) { if (p.y == null) { pen = false; continue; } d += (pen ? "L" : "M") + X(p.x).toFixed(1) + "," + Y(p.y).toFixed(1); pen = true; }
+    return `<path d="${d}" fill="none" stroke="${l.color}" stroke-width="1.8" stroke-linejoin="round"/>`;
+  }).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block">${grid}${xl}${paths}</svg>
+    <div class="legend">${lines.map(l => `<span><i class="sw" style="background:${l.color}"></i>${l.name}</span>`).join("")}</div>`;
+}
+function renderLongterm() {
+  const src = $("#srcSel").value, m = src === "server" ? server : browserModel();
+  if (src === "server" && !server) {
+    $("#srcInfo").textContent = "";
+    $("#longterm").innerHTML = serverErr === "not set up yet"
+      ? `<div class="setup">The server monitor hasn't saved anything yet. It runs automatically every 10 minutes once this repo's <b>Actions</b> are on. To start it now, open the repo's <b>Actions</b> tab, pick <b>Status monitor</b>, and click <b>Run workflow</b>. Until then, switch to <b>This browser</b> above.</div>`
+      : `<div class="empty">${serverErr ? "Couldn't load server history (it may be blocked on this network). Switch to This browser above." : "Loading…"}</div>`;
+    return;
+  }
+  if (!m.since) { $("#srcInfo").textContent = ""; $("#longterm").innerHTML = `<div class="empty">No history yet.</div>`; return; }
+  $("#srcInfo").textContent = `Tracking since ${fmtTime(m.since)}` + (m.last ? ` · last check ${ago(m.last)}` : "") + (m.runs ? ` · ${m.runs.toLocaleString()} runs` : "") + ".";
+
+  // 90-day bars
+  const days = [...Array(90)].map((_, i) => dayKey(Date.now() - (89 - i) * 864e5));
+  const bars = SERVICES.map(s => {
+    const cells = days.map(d => { const r = m.daily[d]?.[s.id]; const u = r ? upPct(r.n, r.up) : null;
+      return `<i class="${u == null ? "" : u >= 99.5 ? "ok" : u >= 95 ? "warn" : "bad"}" title="${d}: ${u == null ? "no data" : fmtPct(u) + " up, avg " + (r.avg ?? "–") + " ms"}"></i>`; }).join("");
+    const u90 = windowUptime(m, s.id, 90);
+    return `<div class="dayrow"><div class="top"><span>${esc(s.name)}</span><b style="color:${upColor(u90)}">${fmtPct(u90)}</b></div><div class="days">${cells}</div><div class="ends"><span>90 days ago</span><span>today</span></div></div>`;
+  }).join("");
+
+  // per-service stats
+  const rows = SERVICES.map(s => {
+    const pts = (m.series[s.id] || []).filter(p => p.s !== "bad").map(p => p.ms);
+    const allDays = Object.values(m.daily).map(r => r[s.id]).filter(Boolean);
+    const checks = allDays.reduce((a, r) => a + r.n, 0);
+    const inc = m.incidents.filter(i => i.id === s.id);
+    const cell = u => `<td class="n" style="color:${upColor(u)}">${fmtPct(u)}</td>`;
+    return `<tr><td>${esc(s.name)}</td>${cell(windowUptime(m, s.id, 1))}${cell(windowUptime(m, s.id, 7))}<td class="n hide" style="color:${upColor(windowUptime(m, s.id, 30))}">${fmtPct(windowUptime(m, s.id, 30))}</td>${cell(windowUptime(m, s.id, 36500))}
+      <td class="n hide">${pctl(pts, .5) ?? "–"}</td><td class="n hide">${pctl(pts, .95) ?? "–"}</td><td class="n hide">${pts.length ? Math.min(...pts) + "–" + Math.max(...pts) : "–"}</td>
+      <td class="n hide">${checks.toLocaleString()}</td><td class="n">${inc.length}</td></tr>`;
+  }).join("");
+
+  // response time: hourly averages, last 7 days
+  const hourly = id => {
+    const b = {};
+    for (const p of m.series[id] || []) if (p.s !== "bad" && p.t > Date.now() - 7 * 864e5) { const h = Math.floor(p.t / 36e5); (b[h] ||= []).push(p.ms); }
+    return Object.entries(b).sort((a, c) => a[0] - c[0]).map(([h, v]) => ({ x: h * 36e5, y: v.reduce((a, c) => a + c, 0) / v.length }));
+  };
+  const respChart = lineChart([
+    { name: "GN 2.0", color: "var(--accent)", pts: hourly("site") },
+    { name: "GN Light", color: "var(--accent2)", pts: hourly("light") },
+    { name: "Game list (jsDelivr)", color: "var(--warn)", pts: hourly("jsd") }
+  ], { fmt: v => Math.round(v) + "ms", xfmt: t => new Date(t).toLocaleDateString([], { month: "short", day: "numeric" }) });
+
+  // daily average response, all time
+  const dk = Object.keys(m.daily).sort();
+  const dailyChart = dk.length > 1 ? lineChart([
+    { name: "GN 2.0", color: "var(--accent)", pts: dk.map(d => ({ x: Date.parse(d), y: m.daily[d].site?.avg ?? null })) },
+    { name: "GN Light", color: "var(--accent2)", pts: dk.map(d => ({ x: Date.parse(d), y: m.daily[d].light?.avg ?? null })) }
+  ], { h: 130, fmt: v => Math.round(v) + "ms", xfmt: t => new Date(t).toLocaleDateString([], { month: "short", day: "numeric", timeZone: "UTC" }) }) : `<div class="empty">Builds up after a couple of days.</div>`;
+
+  // records
+  const closed = m.incidents.filter(i => i.end), longest = m.incidents.reduce((a, i) => { const d = (i.end || Date.now()) - i.start; return d > (a?.d || 0) ? { ...i, d } : a; }, null);
+  const siteDays = dk.filter(d => m.daily[d].site?.avg != null);
+  const best = siteDays.reduce((a, d) => !a || m.daily[d].site.avg < m.daily[a].site.avg ? d : a, null);
+  const worst = siteDays.reduce((a, d) => !a || m.daily[d].site.avg > m.daily[a].site.avg ? d : a, null);
+  const allPts = Object.values(m.series).flat(), slowPct = allPts.length ? allPts.filter(p => p.s === "warn").length / allPts.length * 100 : null;
+  const streak = (() => { const ids = ["site", "light"]; const pts = ids.flatMap(id => m.series[id] || []).filter(p => p.s === "bad").map(p => p.t);
+    const lastDown = Math.max(0, ...pts, ...m.incidents.filter(i => ids.includes(i.id)).map(i => i.end || Date.now())); return Date.now() - (lastDown || m.since); })();
+  const kpi = (l, v) => `<div class="kpi"><div class="v" style="font-size:18px">${v}</div><div class="l">${l}</div></div>`;
+  const records = [
+    kpi("Sites up streak", dur(streak)),
+    kpi("Downtime, 7 days (all services)", downtime(m.incidents, null, 7) ? dur(downtime(m.incidents, null, 7)) : "none"),
+    kpi("Downtime, 30 days (sites)", (() => { const d = downtime(m.incidents, "site", 30) + downtime(m.incidents, "light", 30); return d ? dur(d) : "none"; })()),
+    kpi("Longest outage", longest ? `${dur(longest.d)} <small style="font-size:12px;font-weight:400;color:var(--muted)">${esc(longest.name)}</small>` : "none"),
+    kpi("Avg time to recover", closed.length ? dur(closed.reduce((a, i) => a + i.end - i.start, 0) / closed.length) : "–"),
+    kpi("Outages, 30 days", m.incidents.filter(i => i.start > Date.now() - 30 * 864e5).length),
+    kpi("Slow checks", slowPct == null ? "–" : slowPct.toFixed(1) + "%"),
+    kpi("Fastest day (GN 2.0)", best ? `${m.daily[best].site.avg} ms <small style="font-size:12px;font-weight:400;color:var(--muted)">${best.slice(5)}</small>` : "–"),
+    kpi("Slowest day (GN 2.0)", worst ? `${m.daily[worst].site.avg} ms <small style="font-size:12px;font-weight:400;color:var(--muted)">${worst.slice(5)}</small>` : "–")
+  ].join("");
+
+  // busiest hours: avg response by hour of day for GN 2.0
+  const byHour = [...Array(24)].map(() => []);
+  for (const p of m.series.site || []) if (p.s !== "bad") byHour[new Date(p.t).getHours()].push(p.ms);
+  const hrAvg = byHour.map(v => v.length ? v.reduce((a, c) => a + c, 0) / v.length : null), hrMax = Math.max(...hrAvg.filter(Boolean), 1);
+  const hours = hrAvg.some(v => v != null) ? `<div style="display:flex;gap:2px;align-items:flex-end;height:60px">${hrAvg.map((v, h) =>
+      `<div title="${h}:00 – ${v == null ? "no data" : Math.round(v) + " ms"}" style="flex:1;height:${v == null ? 2 : Math.max(3, v / hrMax * 60)}px;border-radius:2px;background:${v == null ? "var(--line)" : "var(--accent)"};opacity:${v == null ? 1 : .35 + .65 * v / hrMax}"></div>`).join("")}</div>
+    <div class="ends" style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted)"><span>12 am</span><span>6 am</span><span>12 pm</span><span>6 pm</span><span>11 pm</span></div>` : `<div class="empty">Not enough data yet.</div>`;
+
+  // library over time
+  const lk = Object.keys(m.library).sort();
+  const lxf = t => new Date(t).toLocaleDateString([], { month: "short", day: "numeric", timeZone: "UTC" });
+  const libChart = lk.length > 1 ? lineChart([
+    { name: "Game list", color: "var(--accent)", pts: lk.map(d => ({ x: Date.parse(d), y: m.library[d].jsd ?? m.library[d].gh ?? m.library[d].hack ?? null })) }
+  ], { h: 110, zero: false, xfmt: lxf }) + lineChart([
+    { name: "GN Originals", color: "var(--ok)", pts: lk.map(d => ({ x: Date.parse(d), y: m.library[d].orig ?? null })) }
+  ], { h: 90, xfmt: lxf })
+    : `<div class="empty">${lk.length ? `Today: ${(m.library[lk[0]].jsd ?? m.library[lk[0]].gh ?? "–").toLocaleString()} games, ${m.library[lk[0]].orig ?? "–"} originals. The chart fills in from tomorrow.` : "No library data yet."}</div>`;
+
+  $("#longterm").innerHTML = `
+    <h3 class="sec">Records</h3><div class="kpis">${records}</div>
+    <h3 class="sec">Uptime, last 90 days</h3>${bars}
+    <h3 class="sec">Per-service stats</h3>
+    <table><tr><th>Service</th><th class="n">24h</th><th class="n">7d</th><th class="n hide">30d</th><th class="n">All time</th><th class="n hide">p50 ms</th><th class="n hide">p95 ms</th><th class="n hide">Range ms</th><th class="n hide">Checks</th><th class="n">Outages</th></tr>${rows}</table>
+    <h3 class="sec">Response time, last 7 days (hourly avg)</h3>${respChart}
+    <h3 class="sec">Daily average response, all time</h3>${dailyChart}
+    <h3 class="sec">GN 2.0 speed by hour of day</h3>${hours}
+    <h3 class="sec">Library size over time</h3>${libChart}`;
+}
+$("#srcSel").onchange = () => { try { localStorage.setItem("gn-src", $("#srcSel").value); } catch {} renderLongterm(); };
 
 /* ---------- Game library ---------- */
 const LISTS = SERVICES.filter(s => ["jsd", "gh", "hack", "orig"].includes(s.id));
@@ -317,6 +508,8 @@ async function checkLibrary() {
     }).join("") + "</table>" +
     `<div style="margin-top:10px"><span class="pill ${mirrors.length < 2 ? "" : inSync ? "ok" : "warn"}">${mirrors.length < 2 ? "Not enough mirrors to compare" : inSync ? "Mirrors in sync" : "Mirrors differ (one is behind, usually catches up within a day)"}</span></div>`;
   rows.forEach(r => { if (!r.err) prev[r.s.id] = r.n; });
+  const libHist = store.get("gn-lib-hist", {}); libHist[dayKey(Date.now())] = { ...(libHist[dayKey(Date.now())] || {}), ...Object.fromEntries(rows.filter(r => !r.err).map(r => [r.s.id, r.n])) };
+  store.set("gn-lib-hist", libHist);
   store.set("gn-lib-prev", prev);
   $("#libCheck").disabled = false;
 }
@@ -404,7 +597,7 @@ $("#runBench").onclick = async () => {
     if (errs) res[k].err = errs;
     renderBench(res);
   }
-  const runs = store.get("gn-bench-runs", []); runs.push({ t: Date.now(), rounds, mode, res }); store.set("gn-bench-runs", runs.slice(-20));
+  const runs = store.get("gn-bench-runs", []); runs.push({ t: Date.now(), rounds, mode, res }); store.set("gn-bench-runs", runs.slice(-500));
   btn.disabled = false; btn.textContent = "Run benchmark";
   renderBenchHist();
 };
@@ -436,21 +629,25 @@ const ago = d => {
   for (const [n, u] of [[86400, "d"], [3600, "h"], [60, "m"]]) if (s >= n) return Math.floor(s / n) + u + " ago";
 };
 async function loadCommits() {
-  const cached = store.get("gn-commits2", null);
-  if (cached && Date.now() - cached.t < 5 * 60 * 1000) return renderCommits(cached.data);
+  const cached = store.get("gn-commits3", null);
+  if (cached && Date.now() - cached.t < 10 * 60 * 1000) return renderCommits(cached.data);
   const data = await Promise.all(REPOS.map(async repo => {
     try {
-      const [c, runs] = await Promise.all([
-        fetch(`https://api.github.com/repos/${repo}/commits?per_page=8`).then(r => r.ok ? r.json() : Promise.reject(r.status)),
-        fetch(`https://api.github.com/repos/${repo}/actions/runs?per_page=1`).then(r => r.ok ? r.json() : null).catch(() => null)
+      const [c, runs, info] = await Promise.all([
+        fetch(`https://api.github.com/repos/${repo}/commits?per_page=100`).then(r => r.ok ? r.json() : Promise.reject(r.status)),
+        fetch(`https://api.github.com/repos/${repo}/actions/runs?per_page=1&branch=main`).then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch(`https://api.github.com/repos/${repo}`).then(r => r.ok ? r.json() : null).catch(() => null)
       ]);
+      const month = c.filter(x => new Date(x.commit.committer.date) > Date.now() - 30 * 864e5).length;
+      const week = c.filter(x => new Date(x.commit.committer.date) > Date.now() - 7 * 864e5).length;
       const run = runs?.workflow_runs?.[0];
       return { repo, date: c[0]?.commit.committer.date, msg: c[0]?.commit.message.split("\n")[0], sha: c[0]?.sha?.slice(0, 7),
                run: run ? { status: run.status, conclusion: run.conclusion, name: run.name } : null,
-               log: c.map(x => ({ date: x.commit.committer.date, msg: x.commit.message.split("\n")[0], sha: x.sha.slice(0, 7), url: x.html_url })) };
+               stats: { week, month: month >= 100 ? "100+" : month, size: info?.size, stars: info?.stargazers_count, forks: info?.forks_count, issues: info?.open_issues_count },
+               log: c.slice(0, 15).map(x => ({ date: x.commit.committer.date, msg: x.commit.message.split("\n")[0], sha: x.sha.slice(0, 7), url: x.html_url })) };
     } catch (e) { return { repo, err: e === 403 ? "GitHub rate limit, try later" : "couldn't load" }; }
   }));
-  if (!data.some(d => d.err)) store.set("gn-commits2", { t: Date.now(), data });
+  if (!data.some(d => d.err)) store.set("gn-commits3", { t: Date.now(), data });
   renderCommits(data);
 }
 function renderChangelog(data) {
@@ -470,23 +667,54 @@ function renderCommits(data) {
       pill = `<span><span class="pill ${cls}">${label}</span> <span class="pill">${ago(d.date)}</span></span>`;
     }
     return `<div class="commit"><a href="https://github.com/${d.repo}" target="_blank" rel="noopener"><b>${d.repo.split("/")[1]}</b></a>${pill}
-      <div class="msg">${d.sha} · ${(d.msg || "").replace(/</g, "&lt;")}</div></div>`;
+      <div class="msg">${d.sha} · ${(d.msg || "").replace(/</g, "&lt;")}</div>
+      ${d.stats ? `<div class="msg" style="display:flex;gap:6px;flex-wrap:wrap;white-space:normal"><span class="pill">${d.stats.week} commits this week</span><span class="pill">${d.stats.month} this month</span>${d.stats.size != null ? `<span class="pill">${kb(d.stats.size * 1024)} repo</span>` : ""}${d.stats.stars != null ? `<span class="pill">★ ${d.stats.stars}</span><span class="pill">${d.stats.forks} forks</span><span class="pill">${d.stats.issues} open issues</span>` : ""}</div>` : ""}</div>`;
   }).join("");
 }
 
+const DATA_KEYS = ["gn-status-hist", "gn-daily", "gn-incidents", "gn-bench-runs", "gn-lib-prev", "gn-lib-hist"];
+let confirmReset = false;
 $("#exportBtn").onclick = () => {
-  const data = {}; ["gn-status-hist", "gn-incidents", "gn-bench-runs", "gn-lib-prev"].forEach(k => data[k] = store.get(k, null));
+  const data = {}; DATA_KEYS.forEach(k => data[k] = store.get(k, null));
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
   a.download = "gn-status-" + new Date().toISOString().slice(0, 10) + ".json"; a.click();
 };
 $("#resetBtn").onclick = () => {
-  ["gn-status-hist", "gn-incidents", "gn-bench-runs", "gn-lib-prev", "gn-commits2"].forEach(k => { try { localStorage.removeItem(k); } catch {} });
-  renderServices(); renderIncidents(); renderBenchHist(); renderKpis({});
+  if (!confirmReset) { confirmReset = true; $("#resetBtn").textContent = "Click again to erase"; setTimeout(() => { confirmReset = false; $("#resetBtn").textContent = "Reset all"; }, 4000); return; }
+  confirmReset = false; $("#resetBtn").textContent = "Reset all";
+  [...DATA_KEYS, "gn-commits2"].forEach(k => { try { localStorage.removeItem(k); } catch {} });
+  renderServices(); renderIncidents(); renderBenchHist(); renderKpis({}); renderLongterm();
+};
+$("#importBtn").onclick = () => $("#importFile").click();
+$("#importFile").onchange = async e => {
+  try {
+    const data = JSON.parse(await e.target.files[0].text());
+    // Merge: union of checks/incidents/runs, imported daily summaries fill in missing days.
+    const hist = store.get("gn-status-hist", {});
+    for (const [id, pts] of Object.entries(data["gn-status-hist"] || {})) {
+      const seen = new Set((hist[id] || []).map(p => p.t));
+      hist[id] = [...(hist[id] || []), ...pts.filter(p => !seen.has(p.t))].sort((a, b) => a.t - b.t).slice(-HIST_MAX);
+    }
+    store.set("gn-status-hist", hist);
+    store.set("gn-daily", { ...(data["gn-daily"] || {}), ...store.get("gn-daily", {}) });
+    store.set("gn-lib-hist", { ...(data["gn-lib-hist"] || {}), ...store.get("gn-lib-hist", {}) });
+    for (const k of ["gn-incidents", "gn-bench-runs"]) {
+      const cur = store.get(k, []), keyOf = x => (x.id || "") + (x.start || x.t);
+      const seen = new Set(cur.map(keyOf));
+      store.set(k, [...cur, ...(data[k] || []).filter(x => !seen.has(keyOf(x)))].sort((a, b) => (a.start || a.t) - (b.start || b.t)));
+    }
+    renderServices(); renderIncidents(); renderBenchHist(); renderKpis(store.get("gn-status-hist", {})); renderLongterm();
+  } catch { alert("That file isn't a GN Status export."); }
+  e.target.value = "";
 };
 
+try { const v = localStorage.getItem("gn-src"); if (v) $("#srcSel").value = v; } catch {}
 renderServices();
 renderKpis(store.get("gn-status-hist", {}));
+renderLongterm();
+loadServer().then(renderLongterm);
+setInterval(() => loadServer().then(renderLongterm), 5 * 60 * 1000);
 renderIncidents();
 renderBenchHist();
 checkAll();

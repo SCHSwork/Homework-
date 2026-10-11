@@ -1,0 +1,50 @@
+name: Status monitor
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: status-monitor
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: app
+
+      - name: Get history branch
+        env:
+          REPO_URL: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
+        run: |
+          if git clone --depth 1 --branch status-data "$REPO_URL" data; then
+            echo "Loaded existing history"
+          else
+            mkdir data && cd data
+            git init -b status-data
+            git remote add origin "$REPO_URL"
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run checks
+        run: node app/.github/scripts/monitor.mjs data
+
+      - name: Save history
+        working-directory: data
+        run: |
+          git config user.name "gn-status-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -qm "Status check $(date -u +%Y-%m-%dT%H:%MZ)" || exit 0
+          for i in 1 2 3; do git push -q origin status-data && break; sleep 5; done

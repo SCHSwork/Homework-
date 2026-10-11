@@ -9,7 +9,12 @@ Live status and benchmark page for GN 2.0 and GN Light.
 - **Incidents**: log of every outage with start time and length.
 - **Benchmark history**: chart and table of past benchmark runs.
 - **Changelog**: newest commits across all SCHSwork repos.
-- **Data**: export history as JSON or reset it.
+- **Long-term history**: 90-day uptime bars, per-service uptime (24h / 7d / 30d / all time), p50/p95 response, response-time charts, speed by hour of day, records (up streak, longest outage, time to recover, downtime), and library size over time. Switch between the server monitor and this browser's own history.
+- **Data**: export, import (merge) or reset this browser's history.
+
+## Server monitor
+
+`.github/workflows/monitor.yml` runs every 10 minutes and saves results to the `status-data` branch: raw checks for 7 days, daily summaries forever, every incident, and daily library counts. To start it right away: **Actions → Status monitor → Run workflow**. GitHub pauses scheduled workflows if a repo has no activity for 60 days; the monitor's own commits keep it active, but if it ever stops, re-enable it from the Actions tab.
 - **Latest deploys**: newest commit and Actions run for each SCHSwork repo (GitHub public API, cached 5 minutes).
 
 Everything runs in the browser from your own network. Edit `SERVICES`, `SITES` and `REPOS` at the top of the script in `index.html` to change what's tracked.
