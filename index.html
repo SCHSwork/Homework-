@@ -127,7 +127,7 @@ body.sim .simbar{display:block}
   </section>
 
   <section>
-    <h2>Incidents <button class="ghost" id="clearInc">Clear</button></h2>
+    <h2>Incidents <button class="ghost" id="clearInc">Clear downtime</button></h2>
     <div id="incidents"></div>
   </section>
 
@@ -335,7 +335,22 @@ function renderIncidents() {
       <td>${i.end ? dur(i.end - i.start) : '<span class="pill bad">ongoing</span>'}</td><td class="hide">${esc(i.why)}</td></tr>`).join("") + "</table>"
     : `<div class="empty">No outages recorded. Nice.</div>`;
 }
-$("#clearInc").onclick = () => { store.set("gn-incidents", store.get("gn-incidents", []).filter(i => !i.end)); renderIncidents(); renderKpis(store.get("gn-status-hist", {})); };
+// Removes every outage and down check from this browser's history (e.g. after testing). Good checks and benchmarks stay.
+let confirmClear = false;
+$("#clearInc").onclick = () => {
+  const btn = $("#clearInc");
+  if (!confirmClear) { confirmClear = true; btn.textContent = "Click again to clear"; setTimeout(() => { confirmClear = false; btn.textContent = "Clear downtime"; }, 4000); return; }
+  confirmClear = false; btn.textContent = "Clear downtime";
+  store.set("gn-incidents", []);
+  const hist = store.get("gn-status-hist", {});
+  for (const id in hist) hist[id] = hist[id].filter(p => p.s !== "bad");
+  store.set("gn-status-hist", hist);
+  const daily = store.get("gn-daily", {});
+  for (const d in daily) for (const id in daily[d]) daily[d][id].n = daily[d][id].up;
+  store.set("gn-daily", daily);
+  renderServices(); renderIncidents(); renderKpis(hist); renderLongterm();
+  checkAll();
+};
 
 /* ---------- Long-term history ---------- */
 const DATA_URL = "https://raw.githubusercontent.com/SCHSwork/Homework-/status-data/";
