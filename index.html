@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GN Status</title>
+<style>
+:root{
+  --bg:#f6f7f9;--panel:#fff;--text:#16181d;--muted:#667085;--line:#e4e7ec;
+  --ok:#12b76a;--warn:#f79009;--bad:#f04438;--idle:#98a2b3;--accent:#4f46e5;--accent2:#0ea5e9;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#0d1017;--panel:#151a23;--text:#e6e9ef;--muted:#8b95a7;--line:#252c39;--accent:#818cf8;--accent2:#38bdf8;
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:960px;margin:0 auto;padding:24px 16px 60px}
+header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;margin-bottom:20px}
+h1{font-size:24px;margin:0;letter-spacing:-.02em}
+h2{font-size:16px;margin:0 0 12px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.sub{color:var(--muted);font-size:13px}
+.overall{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:999px;background:var(--panel);border:1px solid var(--line);font-weight:600}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--idle);flex:none}
+.dot.ok{background:var(--ok);box-shadow:0 0 0 4px color-mix(in srgb,var(--ok) 20%,transparent)}
+.dot.warn{background:var(--warn)}.dot.bad{background:var(--bad)}
+section{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:16px}
+.row{display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
+.row:first-of-type{border-top:0}
+.name{font-weight:600}.name small{display:block;font-weight:400;color:var(--muted);font-size:12px;word-break:break-all}
+.ms{font-variant-numeric:tabular-nums;color:var(--muted);font-size:13px;text-align:right;min-width:62px}
+.spark{display:flex;gap:2px;align-items:flex-end;height:22px}
+.spark i{width:4px;border-radius:1px;background:var(--idle);opacity:.85}
+.spark i.ok{background:var(--ok)}.spark i.warn{background:var(--warn)}.spark i.bad{background:var(--bad)}
+button{font:inherit;font-weight:600;border:0;border-radius:10px;padding:9px 14px;background:var(--accent);color:#fff;cursor:pointer}
+button.ghost{background:transparent;color:var(--text);border:1px solid var(--line)}
+button:disabled{opacity:.5;cursor:default}
+select{font:inherit;padding:8px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--text)}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-top:12px}
+.card{border:1px solid var(--line);border-radius:12px;padding:14px}
+.card h3{margin:0 0 8px;font-size:15px;display:flex;align-items:center;gap:8px}
+.sw{width:10px;height:10px;border-radius:3px}
+.stat{display:flex;justify-content:space-between;padding:4px 0;font-size:14px}
+.stat b{font-variant-numeric:tabular-nums}
+.bar{height:8px;border-radius:4px;background:var(--line);overflow:hidden;margin:2px 0 8px}
+.bar span{display:block;height:100%;border-radius:4px;transition:width .4s}
+.verdict{margin-top:12px;padding:12px;border-radius:10px;background:color-mix(in srgb,var(--accent) 10%,transparent);font-weight:500;display:none}
+.commit{padding:10px 0;border-top:1px solid var(--line);display:grid;grid-template-columns:1fr auto;gap:4px 10px}
+.commit:first-of-type{border-top:0}
+.commit .msg{color:var(--muted);font-size:13px;grid-column:1/-1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pill{font-size:12px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.pill.ok{color:var(--ok);border-color:currentColor}.pill.bad{color:var(--bad);border-color:currentColor}.pill.warn{color:var(--warn);border-color:currentColor}
+a{color:var(--accent)}
+.log{font:12px ui-monospace,Menlo,monospace;color:var(--muted);margin-top:10px;max-height:120px;overflow:auto;white-space:pre-wrap}
+@media (max-width:560px){.row{grid-template-columns:auto 1fr auto}.spark{display:none}}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>GN Status</h1>
+      <div class="sub">Live health of GN 2.0, GN Light and everything they load from. <span id="updated"></span></div>
+    </div>
+    <div class="overall"><span class="dot" id="overallDot"></span><span id="overallText">Checking…</span></div>
+  </header>
+
+  <section>
+    <h2>Services <span class="controls"><span class="sub" id="nextCheck"></span><button class="ghost" id="recheck">Check now</button></span></h2>
+    <div id="services"></div>
+  </section>
+
+  <section>
+    <h2>Benchmark: GN 2.0 vs GN Light</h2>
+    <div class="controls">
+      <select id="rounds"><option value="3">3 rounds</option><option value="5" selected>5 rounds</option><option value="10">10 rounds</option></select>
+      <select id="mode">
+        <option value="both" selected>Download + full load</option>
+        <option value="fetch">Download only</option>
+        <option value="frame">Full load only</option>
+      </select>
+      <button id="runBench">Run benchmark</button>
+    </div>
+    <div class="sub" style="margin-top:8px"><b>Download</b> fetches the page plus its own CSS/JS with caching off. <b>Full load</b> opens the real site in a hidden frame and times it until the page's load event.</div>
+    <div class="cards" id="benchCards"></div>
+    <div class="verdict" id="verdict"></div>
+    <div class="log" id="benchLog"></div>
+  </section>
+
+  <section>
+    <h2>Latest deploys</h2>
+    <div id="commits"><div class="sub">Loading…</div></div>
+  </section>
+
+  <div class="sub" style="text-align:center">Checks run in your browser from your network, so a "down" result can also mean your network blocks that host.</div>
+</main>
+
+<script>
+const SITES = {
+  full:  { name: "GN 2.0",   url: "https://schswork.github.io/math/",     color: "var(--accent)" },
+  light: { name: "GN Light", url: "https://schswork.github.io/gn-light/", color: "var(--accent2)" }
+};
+
+// cors:true → we can read the response and its status. false → opaque check (reachable or not).
+const SERVICES = [
+  { id:"site",   name:"GN 2.0 site",           url: SITES.full.url,  cors:true },
+  { id:"light",  name:"GN Light site",         url: SITES.light.url, cors:true },
+  { id:"jsd",    name:"Game list · jsDelivr",  url:"https://cdn.jsdelivr.net/gh/freebuisness/assets@main/zones.json", cors:true },
+  { id:"gh",     name:"Game list · GitHub",    url:"https://raw.githubusercontent.com/freebuisness/assets/main/zones.json", cors:true },
+  { id:"hack",   name:"Game list · githack",   url:"https://rawcdn.githack.com/freebuisness/assets/HEAD/zones.json", cors:true },
+  { id:"orig",   name:"GN Originals list",     url:"https://cdn.jsdelivr.net/gh/SCHSwork/GN-originals@main/games.json", cors:true },
+  { id:"fb",     name:"Accounts (Firebase SDK)", url:"https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js", cors:true },
+  { id:"famobi", name:"Partner games (Famobi)", url:"https://img.cdn.famobi.com/favicon.ico", cors:false }
+];
+
+const REPOS = ["SCHSwork/math", "SCHSwork/gn-light", "SCHSwork/GN-originals", "SCHSwork/Homework-"];
+const SLOW_MS = 1500, TIMEOUT_MS = 10000, INTERVAL_S = 60;
+
+const store = {
+  get(k, d){ try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
+  set(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+};
+const $ = s => document.querySelector(s);
+const bust = u => u + (u.includes("?") ? "&" : "?") + "_=" + Date.now();
+
+async function timedFetch(url, opts = {}) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+  const t0 = performance.now();
+  try {
+    const res = await fetch(bust(url), { cache: "no-store", signal: ctrl.signal, ...opts });
+    const body = opts.mode === "no-cors" ? null : await res.arrayBuffer();
+    return { ms: performance.now() - t0, res, bytes: body ? body.byteLength : 0, text: body ? new TextDecoder().decode(body) : "" };
+  } finally { clearTimeout(t); }
+}
+
+/* ---------- Services ---------- */
+function renderServices() {
+  const hist = store.get("gn-status-hist", {});
+  $("#services").innerHTML = SERVICES.map(s => {
+    const h = hist[s.id] || [];
+    const last = h[h.length - 1];
+    const state = last ? last.s : "";
+    const ms = last ? (last.s === "bad" ? (last.e || "down") : Math.round(last.ms) + " ms") : "…";
+    const bars = h.slice(-30).map(p => `<i class="${p.s}" style="height:${p.s === "bad" ? 22 : Math.max(4, Math.min(22, p.ms / 80))}px"></i>`).join("");
+    return `<div class="row"><span class="dot ${state}"></span>
+      <div class="name">${s.name}<small>${new URL(s.url).host}</small></div>
+      <div class="spark" title="Last 30 checks">${bars}</div>
+      <div class="ms">${ms}</div></div>`;
+  }).join("");
+}
+
+async function checkOne(s) {
+  try {
+    const r = await timedFetch(s.url, s.cors ? {} : { mode: "no-cors" });
+    if (s.cors && !r.res.ok) return { s: "bad", ms: r.ms, e: "HTTP " + r.res.status };
+    return { s: r.ms > SLOW_MS ? "warn" : "ok", ms: r.ms };
+  } catch (e) {
+    return { s: "bad", ms: TIMEOUT_MS, e: e.name === "AbortError" ? "timeout" : "blocked/down" };
+  }
+}
+
+async function checkAll() {
+  $("#recheck").disabled = true;
+  const results = await Promise.all(SERVICES.map(checkOne));
+  const hist = store.get("gn-status-hist", {});
+  SERVICES.forEach((s, i) => { (hist[s.id] ||= []).push({ ...results[i], t: Date.now() }); hist[s.id] = hist[s.id].slice(-60); });
+  store.set("gn-status-hist", hist);
+  renderServices();
+
+  const bad = results.filter(r => r.s === "bad").length, slow = results.filter(r => r.s === "warn").length;
+  const siteDown = results[0].s === "bad" || results[1].s === "bad";
+  const listDown = results.slice(2, 5).every(r => r.s === "bad");
+  let cls = "ok", txt = "All systems normal";
+  if (siteDown || listDown) { cls = "bad"; txt = siteDown ? "A site is down" : "Game list unreachable"; }
+  else if (bad) { cls = "warn"; txt = `${bad} service${bad > 1 ? "s" : ""} down (backups covering)`; }
+  else if (slow) { cls = "warn"; txt = `${slow} slow`; }
+  $("#overallDot").className = "dot " + cls;
+  $("#overallText").textContent = txt;
+  $("#updated").textContent = "Updated " + new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }) + ".";
+  $("#recheck").disabled = false;
+  countdown = INTERVAL_S;
+}
+
+let countdown = INTERVAL_S;
+setInterval(() => {
+  if (document.hidden) return;
+  countdown--;
+  $("#nextCheck").textContent = `next in ${countdown}s`;
+  if (countdown <= 0) checkAll();
+}, 1000);
+$("#recheck").onclick = checkAll;
+
+/* ---------- Benchmark ---------- */
+const log = m => { const el = $("#benchLog"); el.textContent += m + "\n"; el.scrollTop = el.scrollHeight; };
+const median = a => { const s = [...a].sort((x, y) => x - y); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+const kb = b => b > 1048576 ? (b / 1048576).toFixed(2) + " MB" : (b / 1024).toFixed(1) + " KB";
+
+async function downloadTest(site) {
+  const t0 = performance.now();
+  const page = await timedFetch(site.url);
+  if (!page.res.ok) throw new Error("HTTP " + page.res.status);
+  const doc = new DOMParser().parseFromString(page.text, "text/html");
+  const base = new URL(site.url), origin = base.origin;
+  const assets = [...doc.querySelectorAll('link[rel="stylesheet"][href], script[src], link[rel="manifest"][href]')]
+    .map(el => new URL(el.getAttribute("href") || el.getAttribute("src"), base))
+    .filter(u => u.origin === origin).map(String);
+  const files = await Promise.all([...new Set(assets)].map(u => timedFetch(u).catch(() => ({ bytes: 0 }))));
+  return { ms: performance.now() - t0, bytes: page.bytes + files.reduce((a, f) => a + f.bytes, 0), files: files.length + 1, ttfb: page.ms };
+}
+
+function frameTest(site) {
+  return new Promise((resolve, reject) => {
+    const f = document.createElement("iframe");
+    f.style.cssText = "position:fixed;left:-9999px;width:1280px;height:800px;border:0;visibility:hidden";
+    f.setAttribute("sandbox", "allow-scripts allow-same-origin");
+    const t0 = performance.now();
+    const timer = setTimeout(() => { f.remove(); reject(new Error("timeout")); }, 30000);
+    f.onload = () => { clearTimeout(timer); const ms = performance.now() - t0; setTimeout(() => f.remove(), 50); resolve(ms); };
+    f.src = bust(site.url);
+    document.body.appendChild(f);
+  });
+}
+
+function renderBench(res) {
+  const keys = Object.keys(res);
+  const maxDl = Math.max(...keys.map(k => res[k].dl ?? 0), 1);
+  const maxFr = Math.max(...keys.map(k => res[k].fr ?? 0), 1);
+  const maxB  = Math.max(...keys.map(k => res[k].bytes ?? 0), 1);
+  const statBar = (label, val, max, fmt, color) => val == null ? "" :
+    `<div class="stat"><span>${label}</span><b>${fmt(val)}</b></div><div class="bar"><span style="width:${(val / max * 100).toFixed(1)}%;background:${color}"></span></div>`;
+  $("#benchCards").innerHTML = keys.map(k => {
+    const r = res[k], s = SITES[k];
+    return `<div class="card"><h3><span class="sw" style="background:${s.color}"></span>${s.name}</h3>
+      ${statBar("Download (median)", r.dl, maxDl, v => Math.round(v) + " ms", s.color)}
+      ${statBar("Full load (median)", r.fr, maxFr, v => Math.round(v) + " ms", s.color)}
+      ${statBar("Page weight", r.bytes, maxB, kb, s.color)}
+      ${r.ttfb != null ? `<div class="stat"><span>First byte</span><b>${Math.round(r.ttfb)} ms</b></div>` : ""}
+      ${r.files != null ? `<div class="stat"><span>Own files</span><b>${r.files}</b></div>` : ""}
+      ${r.err ? `<div class="stat" style="color:var(--bad)"><span>Errors</span><b>${r.err}</b></div>` : ""}
+    </div>`;
+  }).join("");
+
+  const f = res.full, l = res.light, parts = [];
+  const pct = (a, b) => Math.round((1 - b / a) * 100);
+  if (f.dl && l.dl) parts.push(`downloads ${Math.abs(pct(f.dl, l.dl))}% ${l.dl < f.dl ? "faster" : "slower"}`);
+  if (f.fr && l.fr) parts.push(`fully loads ${Math.abs(pct(f.fr, l.fr))}% ${l.fr < f.fr ? "faster" : "slower"}`);
+  if (f.bytes && l.bytes) parts.push(`is ${Math.abs(pct(f.bytes, l.bytes))}% ${l.bytes < f.bytes ? "lighter" : "heavier"}`);
+  const v = $("#verdict");
+  if (parts.length) { v.style.display = "block"; v.textContent = "GN Light " + parts.join(", ") + " than GN 2.0."; }
+}
+
+$("#runBench").onclick = async () => {
+  const rounds = +$("#rounds").value, mode = $("#mode").value;
+  const btn = $("#runBench"); btn.disabled = true; $("#benchLog").textContent = ""; $("#verdict").style.display = "none";
+  const res = { full: {}, light: {} };
+  for (const k of Object.keys(SITES)) {
+    const dl = [], fr = [], ttfb = []; let errs = 0;
+    for (let i = 1; i <= rounds; i++) {
+      btn.textContent = `${SITES[k].name} ${i}/${rounds}…`;
+      if (mode !== "frame") {
+        try { const r = await downloadTest(SITES[k]); dl.push(r.ms); ttfb.push(r.ttfb); res[k].bytes = r.bytes; res[k].files = r.files;
+              log(`${SITES[k].name} download #${i}: ${Math.round(r.ms)} ms, ${kb(r.bytes)}`); }
+        catch (e) { errs++; log(`${SITES[k].name} download #${i}: ${e.message}`); }
+      }
+      if (mode !== "fetch") {
+        try { const ms = await frameTest(SITES[k]); fr.push(ms); log(`${SITES[k].name} full load #${i}: ${Math.round(ms)} ms`); }
+        catch (e) { errs++; log(`${SITES[k].name} full load #${i}: ${e.message}`); }
+      }
+    }
+    if (dl.length) { res[k].dl = median(dl); res[k].ttfb = median(ttfb); }
+    if (fr.length) res[k].fr = median(fr);
+    if (errs) res[k].err = errs;
+    renderBench(res);
+  }
+  const runs = store.get("gn-bench-runs", []); runs.push({ t: Date.now(), rounds, mode, res }); store.set("gn-bench-runs", runs.slice(-20));
+  btn.disabled = false; btn.textContent = "Run benchmark";
+};
+
+/* ---------- Deploys ---------- */
+const ago = d => {
+  const s = (Date.now() - new Date(d)) / 1000;
+  if (s < 60) return "just now";
+  for (const [n, u] of [[86400, "d"], [3600, "h"], [60, "m"]]) if (s >= n) return Math.floor(s / n) + u + " ago";
+};
+async function loadCommits() {
+  const cached = store.get("gn-commits", null);
+  if (cached && Date.now() - cached.t < 5 * 60 * 1000) return renderCommits(cached.data);
+  const data = await Promise.all(REPOS.map(async repo => {
+    try {
+      const [c, runs] = await Promise.all([
+        fetch(`https://api.github.com/repos/${repo}/commits?per_page=1`).then(r => r.ok ? r.json() : Promise.reject(r.status)),
+        fetch(`https://api.github.com/repos/${repo}/actions/runs?per_page=1`).then(r => r.ok ? r.json() : null).catch(() => null)
+      ]);
+      const run = runs?.workflow_runs?.[0];
+      return { repo, date: c[0]?.commit.committer.date, msg: c[0]?.commit.message.split("\n")[0], sha: c[0]?.sha?.slice(0, 7),
+               run: run ? { status: run.status, conclusion: run.conclusion, name: run.name } : null };
+    } catch (e) { return { repo, err: e === 403 ? "GitHub rate limit, try later" : "couldn't load" }; }
+  }));
+  if (!data.some(d => d.err)) store.set("gn-commits", { t: Date.now(), data });
+  renderCommits(data);
+}
+function renderCommits(data) {
+  $("#commits").innerHTML = data.map(d => {
+    if (d.err) return `<div class="commit"><b>${d.repo.split("/")[1]}</b><span class="pill">${d.err}</span></div>`;
+    let pill = `<span class="pill">${ago(d.date)}</span>`;
+    if (d.run) {
+      const cls = d.run.status !== "completed" ? "warn" : d.run.conclusion === "success" ? "ok" : "bad";
+      const label = d.run.status !== "completed" ? "deploying" : d.run.conclusion === "success" ? "deployed" : d.run.conclusion;
+      pill = `<span><span class="pill ${cls}">${label}</span> <span class="pill">${ago(d.date)}</span></span>`;
+    }
+    return `<div class="commit"><a href="https://github.com/${d.repo}" target="_blank" rel="noopener"><b>${d.repo.split("/")[1]}</b></a>${pill}
+      <div class="msg">${d.sha} · ${(d.msg || "").replace(/</g, "&lt;")}</div></div>`;
+  }).join("");
+}
+
+renderServices();
+checkAll();
+loadCommits();
+</script>
+</body>
+</html>
