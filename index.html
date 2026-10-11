@@ -52,7 +52,21 @@ select{font:inherit;padding:8px;border-radius:10px;border:1px solid var(--line);
 .pill.ok{color:var(--ok);border-color:currentColor}.pill.bad{color:var(--bad);border-color:currentColor}.pill.warn{color:var(--warn);border-color:currentColor}
 a{color:var(--accent)}
 .log{font:12px ui-monospace,Menlo,monospace;color:var(--muted);margin-top:10px;max-height:120px;overflow:auto;white-space:pre-wrap}
-@media (max-width:560px){.row{grid-template-columns:auto 1fr auto}.spark{display:none}}
+.row{grid-template-columns:auto 1fr auto auto auto}
+.up{font-variant-numeric:tabular-nums;font-size:13px;font-weight:600;min-width:58px;text-align:right}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.kpi{border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.kpi .v{font-size:24px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.kpi .l{color:var(--muted);font-size:12px}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:left;padding:8px 6px;border-top:1px solid var(--line)}
+th{color:var(--muted);font-weight:500;font-size:12px;border-top:0}
+td.n{text-align:right;font-variant-numeric:tabular-nums}
+.empty{color:var(--muted);font-size:13px;padding:6px 0}
+.hchart{width:100%;height:140px;display:block;margin-top:10px}
+.legend{display:flex;gap:14px;font-size:12px;color:var(--muted);margin-top:6px}
+.legend span{display:flex;align-items:center;gap:6px}
+@media (max-width:560px){.row{grid-template-columns:auto 1fr auto auto}.spark{display:none}td.hide,th.hide{display:none}}
 </style>
 </head>
 <body>
@@ -66,8 +80,24 @@ a{color:var(--accent)}
   </header>
 
   <section>
+    <h2>Overview <span class="sub" id="uptimeSpan"></span></h2>
+    <div class="kpis" id="kpis"></div>
+  </section>
+
+  <section>
     <h2>Services <span class="controls"><span class="sub" id="nextCheck"></span><button class="ghost" id="recheck">Check now</button></span></h2>
     <div id="services"></div>
+  </section>
+
+  <section>
+    <h2>Game library <button class="ghost" id="libCheck">Recheck</button></h2>
+    <div class="sub" style="margin-bottom:8px">Counts entries in each copy of the game list and checks the mirrors match each other.</div>
+    <div id="library"><div class="empty">Loading…</div></div>
+  </section>
+
+  <section>
+    <h2>Incidents <button class="ghost" id="clearInc">Clear</button></h2>
+    <div id="incidents"></div>
   </section>
 
   <section>
@@ -88,8 +118,23 @@ a{color:var(--accent)}
   </section>
 
   <section>
+    <h2>Benchmark history <button class="ghost" id="clearBench">Clear</button></h2>
+    <div id="benchHist"></div>
+  </section>
+
+  <section>
     <h2>Latest deploys</h2>
     <div id="commits"><div class="sub">Loading…</div></div>
+  </section>
+
+  <section>
+    <h2>Changelog <span class="sub">newest commits across all repos</span></h2>
+    <div id="changelog"><div class="empty">Loading…</div></div>
+  </section>
+
+  <section>
+    <h2>Data <span class="controls"><button class="ghost" id="exportBtn">Export JSON</button><button class="ghost" id="resetBtn">Reset all</button></span></h2>
+    <div class="sub">History is kept in this browser only (last ~24 hours of checks, 20 benchmark runs, 50 incidents).</div>
   </section>
 
   <div class="sub" style="text-align:center">Checks run in your browser from your network, so a "down" result can also mean your network blocks that host.</div>
@@ -114,7 +159,7 @@ const SERVICES = [
 ];
 
 const REPOS = ["SCHSwork/math", "SCHSwork/gn-light", "SCHSwork/GN-originals", "SCHSwork/Homework-"];
-const SLOW_MS = 1500, TIMEOUT_MS = 10000, INTERVAL_S = 60;
+const HIST_MAX = 1440, SLOW_MS = 1500, TIMEOUT_MS = 10000, INTERVAL_S = 60;
 
 const store = {
   get(k, d){ try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
@@ -135,6 +180,11 @@ async function timedFetch(url, opts = {}) {
 }
 
 /* ---------- Services ---------- */
+const uptime = h => h.length ? h.filter(p => p.s !== "bad").length / h.length * 100 : null;
+const upColor = u => u == null ? "var(--muted)" : u >= 99 ? "var(--ok)" : u >= 95 ? "var(--warn)" : "var(--bad)";
+const esc = t => String(t ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
+const fmtTime = t => new Date(t).toLocaleString([], { month:"short", day:"numeric", hour:"numeric", minute:"2-digit" });
+const dur = ms => { const m = Math.round(ms / 60000); return m < 1 ? "<1 min" : m < 60 ? m + " min" : (m / 60).toFixed(1) + " h"; };
 function renderServices() {
   const hist = store.get("gn-status-hist", {});
   $("#services").innerHTML = SERVICES.map(s => {
@@ -146,7 +196,8 @@ function renderServices() {
     return `<div class="row"><span class="dot ${state}"></span>
       <div class="name">${s.name}<small>${new URL(s.url).host}</small></div>
       <div class="spark" title="Last 30 checks">${bars}</div>
-      <div class="ms">${ms}</div></div>`;
+      <div class="ms">${ms}</div>
+      <div class="up" style="color:${upColor(uptime(h))}" title="Uptime over ${h.length} checks">${uptime(h) == null ? "–" : uptime(h).toFixed(1) + "%"}</div></div>`;
   }).join("");
 }
 
@@ -164,9 +215,11 @@ async function checkAll() {
   $("#recheck").disabled = true;
   const results = await Promise.all(SERVICES.map(checkOne));
   const hist = store.get("gn-status-hist", {});
-  SERVICES.forEach((s, i) => { (hist[s.id] ||= []).push({ ...results[i], t: Date.now() }); hist[s.id] = hist[s.id].slice(-60); });
+  SERVICES.forEach((s, i) => { (hist[s.id] ||= []).push({ ...results[i], t: Date.now() }); hist[s.id] = hist[s.id].slice(-HIST_MAX); });
   store.set("gn-status-hist", hist);
+  trackIncidents(results);
   renderServices();
+  renderKpis(hist);
 
   const bad = results.filter(r => r.s === "bad").length, slow = results.filter(r => r.s === "warn").length;
   const siteDown = results[0].s === "bad" || results[1].s === "bad";
@@ -190,6 +243,84 @@ setInterval(() => {
   if (countdown <= 0) checkAll();
 }, 1000);
 $("#recheck").onclick = checkAll;
+
+/* ---------- Overview ---------- */
+function renderKpis(hist) {
+  const all = SERVICES.flatMap(s => hist[s.id] || []);
+  const sites = [...(hist.site || []), ...(hist.light || [])];
+  const okMs = all.filter(p => p.s !== "bad").map(p => p.ms);
+  const first = Math.min(...all.map(p => p.t));
+  const open = store.get("gn-incidents", []).filter(i => !i.end).length;
+  const k = [
+    ["Site uptime", uptime(sites) == null ? "–" : uptime(sites).toFixed(2) + "%", upColor(uptime(sites))],
+    ["All services", uptime(all) == null ? "–" : uptime(all).toFixed(2) + "%", upColor(uptime(all))],
+    ["Avg response", okMs.length ? Math.round(okMs.reduce((a, b) => a + b, 0) / okMs.length) + " ms" : "–"],
+    ["Open incidents", open, open ? "var(--bad)" : "var(--ok)"],
+    ["Checks logged", all.length.toLocaleString()]
+  ];
+  $("#kpis").innerHTML = k.map(([l, v, c]) => `<div class="kpi"><div class="v" ${c ? `style="color:${c}"` : ""}>${v}</div><div class="l">${l}</div></div>`).join("");
+  $("#uptimeSpan").textContent = isFinite(first) ? "since " + fmtTime(first) : "";
+}
+
+/* ---------- Incidents ---------- */
+function trackIncidents(results) {
+  const inc = store.get("gn-incidents", []);
+  SERVICES.forEach((s, i) => {
+    const r = results[i], open = inc.find(x => x.id === s.id && !x.end);
+    if (r.s === "bad" && !open) inc.push({ id: s.id, name: s.name, start: Date.now(), why: r.e });
+    if (r.s !== "bad" && open) open.end = Date.now();
+  });
+  store.set("gn-incidents", inc.slice(-50));
+  renderIncidents();
+}
+function renderIncidents() {
+  const inc = store.get("gn-incidents", []).slice().reverse();
+  $("#incidents").innerHTML = inc.length ? `<table><tr><th>Service</th><th>Started</th><th>Length</th><th class="hide">Reason</th></tr>` +
+    inc.slice(0, 15).map(i => `<tr><td>${esc(i.name)}</td><td>${fmtTime(i.start)}</td>
+      <td>${i.end ? dur(i.end - i.start) : '<span class="pill bad">ongoing</span>'}</td><td class="hide">${esc(i.why)}</td></tr>`).join("") + "</table>"
+    : `<div class="empty">No outages recorded. Nice.</div>`;
+}
+$("#clearInc").onclick = () => { store.set("gn-incidents", store.get("gn-incidents", []).filter(i => !i.end)); renderIncidents(); renderKpis(store.get("gn-status-hist", {})); };
+
+/* ---------- Game library ---------- */
+const LISTS = SERVICES.filter(s => ["jsd", "gh", "hack", "orig"].includes(s.id));
+function countEntries(j) {
+  if (Array.isArray(j)) return j.length;
+  if (j && typeof j === "object") {
+    const arrs = Object.values(j).filter(Array.isArray);
+    return arrs.length ? arrs.reduce((a, x) => a + x.length, 0) : Object.keys(j).length;
+  }
+  return 0;
+}
+async function hash(text) {
+  const b = await crypto.subtle.digest("SHA-1", new TextEncoder().encode(text));
+  return [...new Uint8Array(b)].slice(0, 4).map(x => x.toString(16).padStart(2, "0")).join("");
+}
+async function checkLibrary() {
+  $("#libCheck").disabled = true;
+  const rows = await Promise.all(LISTS.map(async s => {
+    try {
+      const r = await timedFetch(s.url);
+      if (!r.res.ok) throw new Error("HTTP " + r.res.status);
+      return { s, n: countEntries(JSON.parse(r.text)), bytes: r.bytes, h: await hash(r.text) };
+    } catch (e) { return { s, err: e.name === "AbortError" ? "timeout" : e.message || "failed" }; }
+  }));
+  const prev = store.get("gn-lib-prev", {});
+  const mirrors = rows.filter(r => r.s.id !== "orig" && !r.err);
+  const inSync = mirrors.length > 1 && new Set(mirrors.map(r => r.h)).size === 1;
+  $("#library").innerHTML = `<table><tr><th>Source</th><th class="n">Entries</th><th class="n hide">Size</th><th class="n">Change</th><th>Version</th></tr>` +
+    rows.map(r => {
+      if (r.err) return `<tr><td>${esc(r.s.name)}</td><td colspan="4"><span class="pill bad">${esc(r.err)}</span></td></tr>`;
+      const d = prev[r.s.id] != null ? r.n - prev[r.s.id] : 0;
+      return `<tr><td>${esc(r.s.name)}</td><td class="n"><b>${r.n.toLocaleString()}</b></td><td class="n hide">${kb(r.bytes)}</td>
+        <td class="n" style="color:${d > 0 ? "var(--ok)" : d < 0 ? "var(--bad)" : "var(--muted)"}">${d > 0 ? "+" + d : d || "–"}</td><td><code>${r.h}</code></td></tr>`;
+    }).join("") + "</table>" +
+    `<div style="margin-top:10px"><span class="pill ${mirrors.length < 2 ? "" : inSync ? "ok" : "warn"}">${mirrors.length < 2 ? "Not enough mirrors to compare" : inSync ? "Mirrors in sync" : "Mirrors differ (one is behind, usually catches up within a day)"}</span></div>`;
+  rows.forEach(r => { if (!r.err) prev[r.s.id] = r.n; });
+  store.set("gn-lib-prev", prev);
+  $("#libCheck").disabled = false;
+}
+$("#libCheck").onclick = checkLibrary;
 
 /* ---------- Benchmark ---------- */
 const log = m => { const el = $("#benchLog"); el.textContent += m + "\n"; el.scrollTop = el.scrollHeight; };
@@ -275,7 +406,28 @@ $("#runBench").onclick = async () => {
   }
   const runs = store.get("gn-bench-runs", []); runs.push({ t: Date.now(), rounds, mode, res }); store.set("gn-bench-runs", runs.slice(-20));
   btn.disabled = false; btn.textContent = "Run benchmark";
+  renderBenchHist();
 };
+
+function renderBenchHist() {
+  const runs = store.get("gn-bench-runs", []);
+  if (!runs.length) { $("#benchHist").innerHTML = `<div class="empty">Run a benchmark to start tracking it over time.</div>`; return; }
+  const pts = runs.map(r => ({ t: r.t, f: r.res.full?.fr ?? r.res.full?.dl, l: r.res.light?.fr ?? r.res.light?.dl }));
+  const max = Math.max(...pts.flatMap(p => [p.f, p.l]).filter(Boolean), 1);
+  const W = 600, H = 140, P = 8, x = i => P + (pts.length < 2 ? (W - 2 * P) / 2 : i * (W - 2 * P) / (pts.length - 1)), y = v => H - P - v / max * (H - 2 * P);
+  const line = (k, c) => { const p = pts.map((q, i) => q[k] ? [x(i), y(q[k])] : null).filter(Boolean);
+    return `<polyline fill="none" stroke="${c}" stroke-width="2" points="${p.map(a => a.join(",")).join(" ")}"/>` + p.map(a => `<circle cx="${a[0]}" cy="${a[1]}" r="3" fill="${c}"/>`).join(""); };
+  $("#benchHist").innerHTML = `<svg class="hchart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${line("f", "var(--accent)")}${line("l", "var(--accent2)")}</svg>
+    <div class="legend"><span><i class="sw" style="background:var(--accent)"></i>GN 2.0</span><span><i class="sw" style="background:var(--accent2)"></i>GN Light</span><span>load time per run (full load, or download if that's all that ran)</span></div>
+    <table style="margin-top:8px"><tr><th>When</th><th class="n">GN 2.0</th><th class="n">GN Light</th><th class="n">Light is</th><th class="hide">Mode</th></tr>` +
+    runs.slice().reverse().slice(0, 10).map(r => {
+      const f = r.res.full?.fr ?? r.res.full?.dl, l = r.res.light?.fr ?? r.res.light?.dl;
+      const p = f && l ? Math.round((1 - l / f) * 100) : null;
+      return `<tr><td>${fmtTime(r.t)}</td><td class="n">${f ? Math.round(f) + " ms" : "–"}</td><td class="n">${l ? Math.round(l) + " ms" : "–"}</td>
+        <td class="n" style="color:${p == null ? "var(--muted)" : p >= 0 ? "var(--ok)" : "var(--bad)"}">${p == null ? "–" : Math.abs(p) + "% " + (p >= 0 ? "faster" : "slower")}</td><td class="hide">${r.rounds}× ${r.mode}</td></tr>`;
+    }).join("") + "</table>";
+}
+$("#clearBench").onclick = () => { store.set("gn-bench-runs", []); renderBenchHist(); };
 
 /* ---------- Deploys ---------- */
 const ago = d => {
@@ -284,23 +436,31 @@ const ago = d => {
   for (const [n, u] of [[86400, "d"], [3600, "h"], [60, "m"]]) if (s >= n) return Math.floor(s / n) + u + " ago";
 };
 async function loadCommits() {
-  const cached = store.get("gn-commits", null);
+  const cached = store.get("gn-commits2", null);
   if (cached && Date.now() - cached.t < 5 * 60 * 1000) return renderCommits(cached.data);
   const data = await Promise.all(REPOS.map(async repo => {
     try {
       const [c, runs] = await Promise.all([
-        fetch(`https://api.github.com/repos/${repo}/commits?per_page=1`).then(r => r.ok ? r.json() : Promise.reject(r.status)),
+        fetch(`https://api.github.com/repos/${repo}/commits?per_page=8`).then(r => r.ok ? r.json() : Promise.reject(r.status)),
         fetch(`https://api.github.com/repos/${repo}/actions/runs?per_page=1`).then(r => r.ok ? r.json() : null).catch(() => null)
       ]);
       const run = runs?.workflow_runs?.[0];
       return { repo, date: c[0]?.commit.committer.date, msg: c[0]?.commit.message.split("\n")[0], sha: c[0]?.sha?.slice(0, 7),
-               run: run ? { status: run.status, conclusion: run.conclusion, name: run.name } : null };
+               run: run ? { status: run.status, conclusion: run.conclusion, name: run.name } : null,
+               log: c.map(x => ({ date: x.commit.committer.date, msg: x.commit.message.split("\n")[0], sha: x.sha.slice(0, 7), url: x.html_url })) };
     } catch (e) { return { repo, err: e === 403 ? "GitHub rate limit, try later" : "couldn't load" }; }
   }));
-  if (!data.some(d => d.err)) store.set("gn-commits", { t: Date.now(), data });
+  if (!data.some(d => d.err)) store.set("gn-commits2", { t: Date.now(), data });
   renderCommits(data);
 }
+function renderChangelog(data) {
+  const all = data.flatMap(d => (d.log || []).map(c => ({ ...c, repo: d.repo.split("/")[1] }))).sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 15);
+  $("#changelog").innerHTML = all.length ? `<table>` + all.map(c => `<tr><td style="white-space:nowrap"><span class="pill">${esc(c.repo)}</span></td>
+    <td><a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.msg)}</a></td><td class="n hide" style="white-space:nowrap;color:var(--muted)">${ago(c.date)}</td></tr>`).join("") + "</table>"
+    : `<div class="empty">Couldn't load commits (GitHub may be rate limiting, try again in a bit).</div>`;
+}
 function renderCommits(data) {
+  renderChangelog(data);
   $("#commits").innerHTML = data.map(d => {
     if (d.err) return `<div class="commit"><b>${d.repo.split("/")[1]}</b><span class="pill">${d.err}</span></div>`;
     let pill = `<span class="pill">${ago(d.date)}</span>`;
@@ -314,8 +474,23 @@ function renderCommits(data) {
   }).join("");
 }
 
+$("#exportBtn").onclick = () => {
+  const data = {}; ["gn-status-hist", "gn-incidents", "gn-bench-runs", "gn-lib-prev"].forEach(k => data[k] = store.get(k, null));
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+  a.download = "gn-status-" + new Date().toISOString().slice(0, 10) + ".json"; a.click();
+};
+$("#resetBtn").onclick = () => {
+  ["gn-status-hist", "gn-incidents", "gn-bench-runs", "gn-lib-prev", "gn-commits2"].forEach(k => { try { localStorage.removeItem(k); } catch {} });
+  renderServices(); renderIncidents(); renderBenchHist(); renderKpis({});
+};
+
 renderServices();
+renderKpis(store.get("gn-status-hist", {}));
+renderIncidents();
+renderBenchHist();
 checkAll();
+checkLibrary();
 loadCommits();
 </script>
 </body>
