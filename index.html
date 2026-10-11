@@ -292,7 +292,7 @@ async function checkAll() {
 
 let countdown = INTERVAL_S;
 setInterval(() => {
-  if (document.hidden) return;
+  if (document.hidden && !SIM) return;
   countdown--;
   $("#nextCheck").textContent = checking ? "checking…" : `next in ${Math.max(0, countdown)}s`;
   if (countdown <= 0) checkAll();
