@@ -143,7 +143,7 @@ body:not(.owner) .owner-only{display:none!important}
       </select>
       <button id="runBench">Run benchmark</button>
     </div>
-    <div class="sub" style="margin-top:8px"><b>Download</b> fetches the page plus its own CSS/JS with caching off. <b>Full load</b> opens the real site in a hidden frame and times it until the page's load event.</div>
+    <div class="sub" style="margin-top:8px"><b>Download</b> fetches the page plus its own CSS/JS with caching off. <b>Full load</b> opens the real site in a hidden frame and times its load event. <b>Games on screen</b> times how long until it has actually drawn game cards, which is what you notice. GN 2.0 fires its load event before it has even fetched its game list, so "full load" flatters it.</div>
     <div class="cards" id="benchCards"></div>
     <div class="verdict" id="verdict"></div>
     <div class="log" id="benchLog"></div>
@@ -174,8 +174,9 @@ body:not(.owner) .owner-only{display:none!important}
 
 <script>
 const SITES = {
-  full:  { name: "GN 2.0",   url: "https://schswork.github.io/math/",     color: "var(--accent)" },
-  light: { name: "GN Light", url: "https://schswork.github.io/gn-light/", color: "var(--accent2)" }
+  // ready: the game cards each site draws once its game list has arrived
+  full:  { name: "GN 2.0",   url: "https://schswork.github.io/math/",     color: "var(--accent)",  ready: "#container .zone-item" },
+  light: { name: "GN Light", url: "https://schswork.github.io/gn-light/", color: "var(--accent2)", ready: "#grid .c" }
 };
 
 // cors:true → we can read the response and its status. false → opaque check (reachable or not).
@@ -615,8 +616,18 @@ function frameTest(site) {
     f.style.cssText = "position:fixed;left:-9999px;width:1280px;height:800px;border:0;visibility:hidden";
     f.setAttribute("sandbox", "allow-scripts allow-same-origin");
     const t0 = performance.now();
-    const timer = setTimeout(() => { f.remove(); reject(new Error("timeout")); }, 30000);
-    f.onload = () => { clearTimeout(timer); const ms = performance.now() - t0; setTimeout(() => f.remove(), 50); resolve(ms); };
+    const timer = setTimeout(() => { clearInterval(poll); f.remove(); load == null ? reject(new Error("timeout")) : resolve({ load, games: null }); }, 30000);
+    // The load event can fire before a site has fetched its game list (GN 2.0 does
+    // that afterwards), so also time how long until game cards are on screen.
+    // Both sites are on the same origin as this page, so the frame can be read.
+    let load = null;
+    const done = games => { clearTimeout(timer); clearInterval(poll); setTimeout(() => f.remove(), 50); resolve({ load, games }); };
+    const poll = setInterval(() => {
+      let n = 0;
+      try { n = f.contentDocument?.querySelectorAll(site.ready).length || 0; } catch { }
+      if (n > 0) done(performance.now() - t0);
+    }, 25);
+    f.onload = () => { load = performance.now() - t0; try { f.contentDocument; } catch { done(null); } };
     f.src = bust(site.url);
     document.body.appendChild(f);
   });
@@ -626,6 +637,7 @@ function renderBench(res) {
   const keys = Object.keys(res);
   const maxDl = Math.max(...keys.map(k => res[k].dl ?? 0), 1);
   const maxFr = Math.max(...keys.map(k => res[k].fr ?? 0), 1);
+  const maxGs = Math.max(...keys.map(k => res[k].gs ?? 0), 1);
   const maxB  = Math.max(...keys.map(k => res[k].bytes ?? 0), 1);
   const statBar = (label, val, max, fmt, color) => val == null ? "" :
     `<div class="stat"><span>${label}</span><b>${fmt(val)}</b></div><div class="bar"><span style="width:${(val / max * 100).toFixed(1)}%;background:${color}"></span></div>`;
@@ -634,6 +646,7 @@ function renderBench(res) {
     return `<div class="card"><h3><span class="sw" style="background:${s.color}"></span>${s.name}</h3>
       ${statBar("Download (median)", r.dl, maxDl, v => Math.round(v) + " ms", s.color)}
       ${statBar("Full load (median)", r.fr, maxFr, v => Math.round(v) + " ms", s.color)}
+      ${statBar("Games on screen (median)", r.gs, maxGs, v => Math.round(v) + " ms", s.color)}
       ${statBar("Page weight", r.bytes, maxB, kb, s.color)}
       ${r.ttfb != null ? `<div class="stat"><span>First byte</span><b>${Math.round(r.ttfb)} ms</b></div>` : ""}
       ${r.files != null ? `<div class="stat"><span>Own files</span><b>${r.files}</b></div>` : ""}
@@ -644,7 +657,8 @@ function renderBench(res) {
   const f = res.full, l = res.light, parts = [];
   const pct = (a, b) => Math.round((1 - b / a) * 100);
   if (f.dl && l.dl) parts.push(`downloads ${Math.abs(pct(f.dl, l.dl))}% ${l.dl < f.dl ? "faster" : "slower"}`);
-  if (f.fr && l.fr) parts.push(`fully loads ${Math.abs(pct(f.fr, l.fr))}% ${l.fr < f.fr ? "faster" : "slower"}`);
+  if (f.gs && l.gs) parts.push(`shows its games ${Math.abs(pct(f.gs, l.gs))}% ${l.gs < f.gs ? "faster" : "slower"}`);
+  if (f.fr && l.fr) parts.push(`fires its load event ${Math.abs(pct(f.fr, l.fr))}% ${l.fr < f.fr ? "sooner" : "later"}`);
   if (f.bytes && l.bytes) parts.push(`is ${Math.abs(pct(f.bytes, l.bytes))}% ${l.bytes < f.bytes ? "lighter" : "heavier"}`);
   const v = $("#verdict");
   if (parts.length) { v.style.display = "block"; v.textContent = "GN Light " + parts.join(", ") + " than GN 2.0."; }
@@ -655,7 +669,7 @@ $("#runBench").onclick = async () => {
   const btn = $("#runBench"); btn.disabled = true; $("#benchLog").textContent = ""; $("#verdict").style.display = "none";
   const res = { full: {}, light: {} };
   for (const k of Object.keys(SITES)) {
-    const dl = [], fr = [], ttfb = []; let errs = 0;
+    const dl = [], fr = [], gs = [], ttfb = []; let errs = 0;
     for (let i = 1; i <= rounds; i++) {
       btn.textContent = `${SITES[k].name} ${i}/${rounds}…`;
       if (mode !== "frame") {
@@ -664,12 +678,14 @@ $("#runBench").onclick = async () => {
         catch (e) { errs++; log(`${SITES[k].name} download #${i}: ${e.message}`); }
       }
       if (mode !== "fetch") {
-        try { const ms = await frameTest(SITES[k]); fr.push(ms); log(`${SITES[k].name} full load #${i}: ${Math.round(ms)} ms`); }
+        try { const r = await frameTest(SITES[k]); if (r.load != null) fr.push(r.load); if (r.games != null) gs.push(r.games);
+              log(`${SITES[k].name} full load #${i}: load event ${r.load == null ? "–" : Math.round(r.load) + " ms"}, games on screen ${r.games == null ? "never" : Math.round(r.games) + " ms"}`); }
         catch (e) { errs++; log(`${SITES[k].name} full load #${i}: ${e.message}`); }
       }
     }
     if (dl.length) { res[k].dl = median(dl); res[k].ttfb = median(ttfb); }
     if (fr.length) res[k].fr = median(fr);
+    if (gs.length) res[k].gs = median(gs);
     if (errs) res[k].err = errs;
     renderBench(res);
   }
@@ -681,16 +697,16 @@ $("#runBench").onclick = async () => {
 function renderBenchHist() {
   const runs = store.get("gn-bench-runs", []);
   if (!runs.length) { $("#benchHist").innerHTML = `<div class="empty">Run a benchmark to start tracking it over time.</div>`; return; }
-  const pts = runs.map(r => ({ t: r.t, f: r.res.full?.fr ?? r.res.full?.dl, l: r.res.light?.fr ?? r.res.light?.dl }));
+  const pts = runs.map(r => ({ t: r.t, f: r.res.full?.gs ?? r.res.full?.fr ?? r.res.full?.dl, l: r.res.light?.gs ?? r.res.light?.fr ?? r.res.light?.dl }));
   const max = Math.max(...pts.flatMap(p => [p.f, p.l]).filter(Boolean), 1);
   const W = 600, H = 140, P = 8, x = i => P + (pts.length < 2 ? (W - 2 * P) / 2 : i * (W - 2 * P) / (pts.length - 1)), y = v => H - P - v / max * (H - 2 * P);
   const line = (k, c) => { const p = pts.map((q, i) => q[k] ? [x(i), y(q[k])] : null).filter(Boolean);
     return `<polyline fill="none" stroke="${c}" stroke-width="2" points="${p.map(a => a.join(",")).join(" ")}"/>` + p.map(a => `<circle cx="${a[0]}" cy="${a[1]}" r="3" fill="${c}"/>`).join(""); };
   $("#benchHist").innerHTML = `<svg class="hchart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${line("f", "var(--accent)")}${line("l", "var(--accent2)")}</svg>
-    <div class="legend"><span><i class="sw" style="background:var(--accent)"></i>GN 2.0</span><span><i class="sw" style="background:var(--accent2)"></i>GN Light</span><span>load time per run (full load, or download if that's all that ran)</span></div>
+    <div class="legend"><span><i class="sw" style="background:var(--accent)"></i>GN 2.0</span><span><i class="sw" style="background:var(--accent2)"></i>GN Light</span><span>time per run (games on screen; older runs: full load or download)</span></div>
     <table style="margin-top:8px"><tr><th>When</th><th class="n">GN 2.0</th><th class="n">GN Light</th><th class="n">Light is</th><th class="hide">Mode</th></tr>` +
     runs.slice().reverse().slice(0, 10).map(r => {
-      const f = r.res.full?.fr ?? r.res.full?.dl, l = r.res.light?.fr ?? r.res.light?.dl;
+      const f = r.res.full?.gs ?? r.res.full?.fr ?? r.res.full?.dl, l = r.res.light?.gs ?? r.res.light?.fr ?? r.res.light?.dl;
       const p = f && l ? Math.round((1 - l / f) * 100) : null;
       return `<tr><td>${fmtTime(r.t)}</td><td class="n">${f ? Math.round(f) + " ms" : "–"}</td><td class="n">${l ? Math.round(l) + " ms" : "–"}</td>
         <td class="n" style="color:${p == null ? "var(--muted)" : p >= 0 ? "var(--ok)" : "var(--bad)"}">${p == null ? "–" : Math.abs(p) + "% " + (p >= 0 ? "faster" : "slower")}</td><td class="hide">${r.rounds}× ${r.mode}</td></tr>`;
