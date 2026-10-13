@@ -301,6 +301,30 @@ setInterval(() => {
 }, 1000);
 $("#recheck").onclick = checkAll;
 
+/* ---------- People online now ----------
+   GN 2.0 and GN Light each write presence/<random id> = { t: time, s: site }
+   every 2 minutes while open (no account, nothing personal). Anyone seen in the
+   last 5 minutes counts as online. Firestore's count query does the counting. */
+let activeUsers = null;
+async function fetchActiveUsers() {
+  const P = "gn-math-dfd85", K = "AIzaSyCVUtHKcMZCs7aaCcO_Gp8fmy41MZnjqcs";
+  try {
+    const res = await fetch(`https://firestore.googleapis.com/v1/projects/${P}/databases/(default)/documents:runAggregationQuery?key=${K}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ structuredAggregationQuery: {
+        structuredQuery: { from: [{ collectionId: "presence" }], where: { fieldFilter: { field: { fieldPath: "t" }, op: "GREATER_THAN", value: { timestampValue: new Date(Date.now() - 5 * 60000).toISOString() } } } },
+        aggregations: [{ alias: "n", count: {} }] } })
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const out = await res.json();
+    const n = Number([].concat(out).map(x => x?.result?.aggregateFields?.n?.integerValue).find(v => v != null));
+    activeUsers = Number.isFinite(n) ? n : null;
+  } catch (e) { activeUsers = null; console.info("Online count unavailable", e); }
+  renderKpis(store.get("gn-status-hist", {}));
+}
+fetchActiveUsers();
+setInterval(() => { if (!document.hidden) fetchActiveUsers(); }, 60000);
+
 /* ---------- Overview ---------- */
 function renderKpis(hist) {
   const all = SERVICES.flatMap(s => hist[s.id] || []);
@@ -313,7 +337,8 @@ function renderKpis(hist) {
     ["All services", uptime(all) == null ? "–" : uptime(all).toFixed(2) + "%", upColor(uptime(all))],
     ["Avg response", okMs.length ? Math.round(okMs.reduce((a, b) => a + b, 0) / okMs.length) + " ms" : "–"],
     ["Open incidents", open, open ? "var(--bad)" : "var(--ok)"],
-    ["Checks logged", all.length.toLocaleString()]
+    ["Checks logged", all.length.toLocaleString()],
+    ["People online now", activeUsers == null ? "–" : activeUsers.toLocaleString(), activeUsers ? "var(--ok)" : null]
   ];
   $("#kpis").innerHTML = k.map(([l, v, c]) => `<div class="kpi"><div class="v" ${c ? `style="color:${c}"` : ""}>${v}</div><div class="l">${l}</div></div>`).join("");
   $("#uptimeSpan").textContent = isFinite(first) ? "since " + fmtTime(first) : "";
