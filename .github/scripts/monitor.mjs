@@ -11,7 +11,12 @@ const SERVICES = [
   { id: "jsd",    name: "Game list · jsDelivr",    url: "https://cdn.jsdelivr.net/gh/freebuisness/assets@main/zones.json" },
   { id: "gh",     name: "Game list · GitHub",      url: "https://raw.githubusercontent.com/freebuisness/assets/main/zones.json" },
   { id: "hack",   name: "Game list · githack",     url: "https://rawcdn.githack.com/freebuisness/assets/HEAD/zones.json" },
+  { id: "fastly", name: "Game list · jsDelivr Fastly",     url: "https://fastly.jsdelivr.net/gh/freebuisness/assets@main/zones.json" },
+  { id: "gcore",  name: "Game list · jsDelivr G-Core",     url: "https://gcore.jsdelivr.net/gh/freebuisness/assets@main/zones.json" },
+  { id: "tcf",    name: "Game list · jsDelivr Cloudflare", url: "https://testingcf.jsdelivr.net/gh/freebuisness/assets@main/zones.json" },
   { id: "orig",   name: "GN Originals list",       url: "https://cdn.jsdelivr.net/gh/SCHSwork/GN-originals@main/games.json" },
+  { id: "ubzlist",  name: "UBZone games list",     url: "https://schswork.github.io/math/config/ubzone-games.json" },
+  { id: "ubzfiles", name: "UBZone game files",     url: "https://cdn.jsdelivr.net/", probes: "https://schswork.github.io/math/config/ubzone-games.json" },
   { id: "fb",     name: "Accounts (Firebase SDK)", url: "https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js" },
   { id: "famobi", name: "Partner games (Famobi)",  url: "https://img.cdn.famobi.com/favicon.ico" }
 ];
@@ -32,7 +37,23 @@ function countEntries(j) {
   return 0;
 }
 
+// UBZone game files: one small file from every repo the games load from, at its pinned commit.
+async function checkProbes(s) {
+  const t0 = performance.now();
+  const list = await check({ url: s.probes });
+  if (list.s === 2) return { s: 2, ms: list.ms, e: "no UBZone list" };
+  let probes = [];
+  try { probes = Object.entries(JSON.parse(list.body).probes || {}).filter(([k, p]) => /^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/.test(k) && /^[\w./-]+$/.test(p)); } catch {}
+  if (!probes.length) return { s: 2, ms: 0, e: "no repos listed" };
+  const res = await Promise.all(probes.map(([key, p]) => { const [repo, sha] = key.split("@"); return check({ url: `https://cdn.jsdelivr.net/gh/${repo}@${sha}/${p}` }).then(r => ({ ...r, repo })); }));
+  const bad = res.filter(r => r.s === 2), ms = Math.round(performance.now() - t0);
+  if (bad.length === probes.length) return { s: 2, ms, e: "all repos unreachable" };
+  if (bad.length) return { s: 1, ms, e: `${bad.length} of ${probes.length} down: ${bad.map(r => r.repo).slice(0, 3).join(", ")}` };
+  return { s: ms > SLOW_MS * 2 ? 1 : 0, ms };
+}
+
 async function check(s) {
+  if (s.probes) return checkProbes(s);
   const t0 = performance.now();
   try {
     const r = await fetch(s.url + (s.url.includes("?") ? "&" : "?") + "_=" + Date.now(),

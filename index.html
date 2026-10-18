@@ -186,7 +186,15 @@ const SERVICES = [
   { id:"jsd",    name:"Game list · jsDelivr",  url:"https://cdn.jsdelivr.net/gh/freebuisness/assets@main/zones.json", cors:true },
   { id:"gh",     name:"Game list · GitHub",    url:"https://raw.githubusercontent.com/freebuisness/assets/main/zones.json", cors:true },
   { id:"hack",   name:"Game list · githack",   url:"https://rawcdn.githack.com/freebuisness/assets/HEAD/zones.json", cors:true },
+  // Backup jsDelivr addresses on other networks; GN 2.0 switches to these when a filter blocks cdn.jsdelivr.net
+  { id:"fastly", name:"Game list · jsDelivr Fastly",     url:"https://fastly.jsdelivr.net/gh/freebuisness/assets@main/zones.json", cors:true },
+  { id:"gcore",  name:"Game list · jsDelivr G-Core",     url:"https://gcore.jsdelivr.net/gh/freebuisness/assets@main/zones.json", cors:true },
+  { id:"tcf",    name:"Game list · jsDelivr Cloudflare", url:"https://testingcf.jsdelivr.net/gh/freebuisness/assets@main/zones.json", cors:true },
   { id:"orig",   name:"GN Originals list",     url:"https://cdn.jsdelivr.net/gh/SCHSwork/GN-originals@main/games.json", cors:true },
+  // UBZone games: GN 2.0's list of them, and one small file from every repo they load from,
+  // at the exact commit GN 2.0 uses (the list's "probes"). Repos change → edit the list in SCHSwork/math, not here.
+  { id:"ubzlist",  name:"UBZone games list",  url: SITES.full.url + "config/ubzone-games.json", cors:true },
+  { id:"ubzfiles", name:"UBZone game files",  url:"https://cdn.jsdelivr.net/", probes: SITES.full.url + "config/ubzone-games.json" },
   { id:"fb",     name:"Accounts (Firebase SDK)", url:"https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js", cors:true },
   { id:"famobi", name:"Partner games (Famobi)", url:"https://img.cdn.famobi.com/favicon.ico", cors:false }
 ];
@@ -227,14 +235,36 @@ function renderServices() {
     const h = hist[s.id] || [];
     const last = h[h.length - 1];
     const state = last ? last.s : "";
-    const ms = last ? (last.s === "bad" ? (last.e || "down") : Math.round(last.ms) + " ms") : "…";
+    const ms = last ? (last.s === "bad" || (last.s === "warn" && last.e) ? (last.e || "down") : Math.round(last.ms) + " ms") : "…";
     const bars = h.slice(-30).map(p => `<i class="${p.s}" style="height:${p.s === "bad" ? 22 : Math.max(4, Math.min(22, p.ms / 80))}px"></i>`).join("");
     return `<div class="row"><span class="dot ${state}"></span>
-      <div class="name">${s.name}<small>${new URL(s.url).host}</small></div>
+      <div class="name">${s.name}<small>${s.probes ? (last && last.n ? last.n + " repos · " : "") + "jsDelivr" : new URL(s.url).host}</small></div>
       <div class="spark" title="Last 30 checks">${bars}</div>
       <div class="ms">${ms}</div>
       <div class="up" style="color:${upColor(uptime(h))}" title="Uptime over ${h.length} checks">${uptime(h) == null ? "–" : uptime(h).toFixed(1) + "%"}</div></div>`;
   }).join("");
+}
+
+// UBZone game files: fetch one small file from each repo (at its pinned commit) in parallel.
+// ok = all reachable, warn = some aren't (those games won't load), bad = none or no list.
+async function checkProbes(s) {
+  const t0 = performance.now();
+  let probes;
+  try {
+    const r = await timedFetch(s.probes);
+    if (!r.res.ok) throw new Error("HTTP " + r.res.status);
+    probes = Object.entries(JSON.parse(r.text).probes || {}).filter(([k, p]) => /^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/.test(k) && /^[\w./-]+$/.test(p));
+  } catch (e) { return { s: "bad", ms: TIMEOUT_MS, e: "no UBZone list" }; }
+  if (!probes.length) return { s: "bad", ms: 0, e: "no repos listed" };
+  const res = await Promise.all(probes.map(async ([key, path]) => {
+    const [repo, sha] = key.split("@");
+    try { const r = await timedFetch(`https://cdn.jsdelivr.net/gh/${repo}@${sha}/${path}`); return r.res.ok ? { ok: true, ms: r.ms } : { ok: false, repo }; }
+    catch { return { ok: false, repo }; }
+  }));
+  const bad = res.filter(x => !x.ok), ms = performance.now() - t0, n = probes.length;
+  if (bad.length === n) return { s: "bad", ms: TIMEOUT_MS, e: "all repos unreachable", n };
+  if (bad.length) return { s: "warn", ms, n, e: `${bad.length} of ${n} down: ${[...new Set(bad.map(x => x.repo))].slice(0, 2).join(", ")}${bad.length > 2 ? "…" : ""}` };
+  return { s: ms > SLOW_MS * 2 ? "warn" : "ok", ms, n };
 }
 
 async function checkOne(s) {
@@ -242,6 +272,7 @@ async function checkOne(s) {
     if (SIM.kind === "slow") { await new Promise(r => setTimeout(r, 2500)); return { s: "warn", ms: 2500 }; }
     return SIM.kind === "http" ? { s: "bad", ms: 120, e: "HTTP 503 (simulated)" } : { s: "bad", ms: TIMEOUT_MS, e: "simulated outage" };
   }
+  if (s.probes) return checkProbes(s);
   try {
     const r = await timedFetch(s.url, s.cors ? {} : { mode: "no-cors" });
     if (s.cors && !r.res.ok) return { s: "bad", ms: r.ms, e: "HTTP " + r.res.status };

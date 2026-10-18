@@ -2,7 +2,7 @@
 
 Live status and benchmark page for GN 2.0 and GN Light.
 
-- **Services**: checks the sites, the three game-list mirrors (jsDelivr, GitHub, githack), GN Originals, Firebase and Famobi every 60 seconds, with a history sparkline.
+- **Services**: checks the sites, the three game-list mirrors (jsDelivr, GitHub, githack) plus the backup jsDelivr addresses (Fastly, G-Core, Cloudflare), GN Originals, the UBZone games list and every repo UBZone games load from, Firebase and Famobi every 60 seconds, with a history sparkline. The UBZone repo list comes from `probes` in `config/ubzone-games.json` on GN 2.0, so it updates itself; one row goes yellow if some repos are down and names them.
 - **Benchmark**: GN 2.0 vs GN Light, download time and page weight plus a full-load timing in a hidden frame, median over several rounds.
 - **Overview**: uptime % for the sites and all services, average response time, open incidents.
 - **Game library**: entry counts for each game-list copy, change since last check, and whether the mirrors are in sync.
