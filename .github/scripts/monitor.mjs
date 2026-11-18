@@ -15,11 +15,22 @@ const SERVICES = [
   { id: "gcore",  name: "Game list · jsDelivr G-Core",     url: "https://gcore.jsdelivr.net/gh/freebuisness/assets@main/zones.json" },
   { id: "tcf",    name: "Game list · jsDelivr Cloudflare", url: "https://testingcf.jsdelivr.net/gh/freebuisness/assets@main/zones.json" },
   { id: "orig",   name: "GN Originals list",       url: "https://cdn.jsdelivr.net/gh/SCHSwork/GN-originals@main/games.json" },
-  { id: "ubzlist",  name: "UBZone games list",     url: "https://schswork.github.io/math/config/ubzone-games.json" },
-  { id: "ubzfiles", name: "UBZone game files",     url: "https://cdn.jsdelivr.net/", probes: "https://schswork.github.io/math/config/ubzone-games.json" },
+  // GN 2.0's other game collections: one small file from every repo each loads from (the lists' "probes")
+  { id: "ubzfiles", name: "UBZone games",     url: "https://cdn.jsdelivr.net/", probes: "https://schswork.github.io/math/config/ubzone-games.json" },
+  { id: "selfiles", name: "Selenite games",   url: "https://cdn.jsdelivr.net/", probes: "https://schswork.github.io/math/config/selenite-games.json" },
+  { id: "g55files", name: "55GMS games",      url: "https://cdn.jsdelivr.net/", probes: "https://schswork.github.io/math/config/55gms-games.json" },
+  { id: "bchsfiles", name: "BCHS Flash games", url: "https://cdn.jsdelivr.net/", probes: "https://schswork.github.io/math/config/bchs-games.json" },
+  { id: "radfiles", name: "Radon games",      url: "https://cdn.jsdelivr.net/", probes: "https://schswork.github.io/math/config/radon-games.json" },
   { id: "fb",     name: "Accounts (Firebase SDK)", url: "https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js" },
-  { id: "famobi", name: "Partner games (Famobi)",  url: "https://img.cdn.famobi.com/favicon.ico" }
+  { id: "fs",     name: "Saves & live updates (Firestore)", url: "https://firestore.googleapis.com/", any: true },
+  { id: "auth",   name: "Sign-in (Firebase Auth)", url: "https://identitytoolkit.googleapis.com/", any: true },
+  { id: "famobi", name: "Partner games (Famobi)",  url: "https://img.cdn.famobi.com/favicon.ico" },
+  { id: "pg",     name: "Partner games (Playgama)", url: "https://playgama.com/favicon.ico", any: true }
 ];
+// jsDelivr blocks every repo of these accounts; GN 2.0 loads them from GitHub (JSD_REFUSED_OWNERS in SCHSwork/math)
+const JSD_BLOCKED_OWNERS = ["genizy", "gn-math", "tty67hlt6jf6"];
+const probeUrl = (repo, sha, p) => JSD_BLOCKED_OWNERS.includes(repo.split("/")[0].toLowerCase())
+  ? `https://raw.githubusercontent.com/${repo}/${sha}/${p}` : `https://cdn.jsdelivr.net/gh/${repo}@${sha}/${p}`;
 const LISTS = ["jsd", "gh", "hack", "orig"];
 const SLOW_MS = 1500, TIMEOUT_MS = 15000, RAW_DAYS = 7, MAX_INCIDENTS = 2000;
 
@@ -37,15 +48,15 @@ function countEntries(j) {
   return 0;
 }
 
-// UBZone game files: one small file from every repo the games load from, at its pinned commit.
+// Game collections: one small file from every repo the games load from, at its pinned commit.
 async function checkProbes(s) {
   const t0 = performance.now();
   const list = await check({ url: s.probes });
-  if (list.s === 2) return { s: 2, ms: list.ms, e: "no UBZone list" };
+  if (list.s === 2) return { s: 2, ms: list.ms, e: "no games list" };
   let probes = [];
   try { probes = Object.entries(JSON.parse(list.body).probes || {}).filter(([k, p]) => /^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/.test(k) && /^[\w./-]+$/.test(p)); } catch {}
   if (!probes.length) return { s: 2, ms: 0, e: "no repos listed" };
-  const res = await Promise.all(probes.map(([key, p]) => { const [repo, sha] = key.split("@"); return check({ url: `https://cdn.jsdelivr.net/gh/${repo}@${sha}/${p}` }).then(r => ({ ...r, repo })); }));
+  const res = await Promise.all(probes.map(([key, p]) => { const [repo, sha] = key.split("@"); return check({ url: probeUrl(repo, sha, p) }).then(r => ({ ...r, repo })); }));
   const bad = res.filter(r => r.s === 2), ms = Math.round(performance.now() - t0);
   if (bad.length === probes.length) return { s: 2, ms, e: "all repos unreachable" };
   if (bad.length) return { s: 1, ms, e: `${bad.length} of ${probes.length} down: ${bad.map(r => r.repo).slice(0, 3).join(", ")}` };
@@ -60,7 +71,8 @@ async function check(s) {
       { signal: AbortSignal.timeout(TIMEOUT_MS), headers: { "user-agent": "GN-Status-Monitor", "cache-control": "no-cache" } });
     const body = await r.text();
     const ms = Math.round(performance.now() - t0);
-    if (!r.ok) return { s: 2, ms, e: "HTTP " + r.status };
+    // any: an API root that answers 404 when it's up (Firestore, Firebase Auth)
+    if (!r.ok && !(s.any && r.status < 500)) return { s: 2, ms, e: "HTTP " + r.status };
     return { s: ms > SLOW_MS ? 1 : 0, ms, body };
   } catch (e) {
     return { s: 2, ms: TIMEOUT_MS, e: e.name === "TimeoutError" ? "timeout" : "unreachable" };
