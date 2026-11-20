@@ -94,6 +94,7 @@ body:not(.owner) .owner-only{display:none!important}
 .hl { margin-top: 6px; max-height: 260px; overflow-y: auto; }
 
 .back{font-size:13px;text-decoration:none}
+.axisrow{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:2px}
 .kpi .v small{font-size:13px;font-weight:600;color:var(--muted);margin-left:2px}
 .kpi .l .dot{display:inline-block;width:8px;height:8px;margin-right:4px;vertical-align:1px}
 .charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
@@ -181,7 +182,7 @@ async function get(path, ms = 8000) {
 /* One series per chart, so no legend: the heading names it. Hover shows the value. */
 function chart(el, points, { label, fmt = num, slotMs = 60000, windowMs = 86400000, startLabel = "24 h ago" }) {
   if (!points.length) { el.innerHTML = '<div class="empty">No data yet. The server records a point every minute.</div>'; return; }
-  const W = 800, H = 140, T = 8, B = 22, ph = H - T - B, now = Date.now(), start = now - windowMs;
+  const W = 800, H = 120, T = 8, B = 4, ph = H - T - B, now = Date.now(), start = now - windowMs;
   const N = Math.round(windowMs / slotMs), slots = new Array(N).fill(null);
   for (const p of points) { const i = Math.floor((p.t - start) / slotMs); if (i >= 0 && i < N) slots[i] = (slots[i] || 0) + p.v; }
   const vals = slots.map(v => v || 0), peak = Math.max(...vals), max = peak > 0 ? peak * 1.15 : 1;
@@ -191,7 +192,7 @@ function chart(el, points, { label, fmt = num, slotMs = 60000, windowMs = 864000
     <line x1="0" x2="${W}" y1="${T + ph}" y2="${T + ph}" class="og-base"/>${peak > 0 ? `<line x1="0" x2="${W}" y1="${y(peak).toFixed(1)}" y2="${y(peak).toFixed(1)}" class="og-grid"/>` : ""}
     <path d="${line}L${x(N - 1)},${T + ph}L${x(0)},${T + ph}Z" class="og-area"/><path d="${line}" class="og-line" vector-effect="non-scaling-stroke"/>
     <line class="og-cross" x1="0" x2="0" y1="${T}" y2="${T + ph}" vector-effect="non-scaling-stroke" visibility="hidden"/>
-    <text x="0" y="${H - 6}">${startLabel}</text><text x="${W}" y="${H - 6}" text-anchor="end">Now</text></svg><span class="og-tip" hidden></span></div>`;
+    </svg><span class="og-tip" hidden></span></div><div class="axisrow"><span>${startLabel}</span><span>Now</span></div>`;
   const box = el.querySelector(".og"), cross = el.querySelector(".og-cross"), tip = el.querySelector(".og-tip");
   box.onpointermove = box.onpointerdown = ev => {
     const r = box.getBoundingClientRect(), i = Math.min(N - 1, Math.max(0, Math.floor((ev.clientX - r.left) / r.width * N)));
@@ -260,7 +261,7 @@ async function loadStatus() {
   $("#sync").innerHTML = !y.enabled
     ? `<div class="empty">Off: the server doesn't have its Firebase key.</div>`
     : [
-      ["Status", `<span class="pill ${y.running ? "" : okRes ? "ok" : "warn"}">${y.running ? "Running" : okRes ? "OK" : "Needs a look"}</span>`],
+      ["Status", (() => { const fresh = /^not run yet/.test(y.lastResult || ""); return `<span class="pill ${y.running || fresh ? "" : okRes ? "ok" : "warn"}">${y.running ? "Running now" : fresh ? "Starting" : okRes ? "OK" : "Needs a look"}</span>`; })()],
       ["Last result", esc(y.lastResult || "–")],
       ["Pieces sent to Firebase", num(y.partsUp)],
       ["Pieces pulled from Firebase", num(y.partsDown)]
