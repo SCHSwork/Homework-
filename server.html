@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GN 2.0 Server · GN Status</title>
+<style>
+:root{
+  --bg:#f6f7f9;--panel:#fff;--text:#16181d;--muted:#667085;--line:#e4e7ec;
+  --ok:#12b76a;--warn:#f79009;--bad:#f04438;--idle:#98a2b3;--accent:#4f46e5;--accent2:#0ea5e9;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#0d1017;--panel:#151a23;--text:#e6e9ef;--muted:#8b95a7;--line:#252c39;--accent:#818cf8;--accent2:#38bdf8;
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:960px;margin:0 auto;padding:24px 16px 60px}
+header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;margin-bottom:20px}
+h1{font-size:24px;margin:0;letter-spacing:-.02em}
+h2{font-size:16px;margin:0 0 12px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.sub{color:var(--muted);font-size:13px}
+.overall{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:999px;background:var(--panel);border:1px solid var(--line);font-weight:600}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--idle);flex:none}
+.dot.ok{background:var(--ok);box-shadow:0 0 0 4px color-mix(in srgb,var(--ok) 20%,transparent)}
+.dot.warn{background:var(--warn)}.dot.bad{background:var(--bad)}
+section{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:16px}
+.row{display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
+.row:first-of-type{border-top:0}
+.name{font-weight:600}.name small{display:block;font-weight:400;color:var(--muted);font-size:12px;word-break:break-all}
+.ms{font-variant-numeric:tabular-nums;color:var(--muted);font-size:13px;text-align:right;min-width:62px}
+.spark{display:flex;gap:2px;align-items:flex-end;height:22px}
+.spark i{width:4px;border-radius:1px;background:var(--idle);opacity:.85}
+.spark i.ok{background:var(--ok)}.spark i.warn{background:var(--warn)}.spark i.bad{background:var(--bad)}
+button{font:inherit;font-weight:600;border:0;border-radius:10px;padding:9px 14px;background:var(--accent);color:#fff;cursor:pointer}
+button.ghost{background:transparent;color:var(--text);border:1px solid var(--line)}
+button:disabled{opacity:.5;cursor:default}
+select{font:inherit;padding:8px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--text)}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-top:12px}
+.card{border:1px solid var(--line);border-radius:12px;padding:14px}
+.card h3{margin:0 0 8px;font-size:15px;display:flex;align-items:center;gap:8px}
+.sw{width:10px;height:10px;border-radius:3px}
+.stat{display:flex;justify-content:space-between;padding:4px 0;font-size:14px}
+.stat b{font-variant-numeric:tabular-nums}
+.bar{height:8px;border-radius:4px;background:var(--line);overflow:hidden;margin:2px 0 8px}
+.bar span{display:block;height:100%;border-radius:4px;transition:width .4s}
+.verdict{margin-top:12px;padding:12px;border-radius:10px;background:color-mix(in srgb,var(--accent) 10%,transparent);font-weight:500;display:none}
+.commit{padding:10px 0;border-top:1px solid var(--line);display:grid;grid-template-columns:1fr auto;gap:4px 10px}
+.commit:first-of-type{border-top:0}
+.commit .msg{color:var(--muted);font-size:13px;grid-column:1/-1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pill{font-size:12px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.pill.ok{color:var(--ok);border-color:currentColor}.pill.bad{color:var(--bad);border-color:currentColor}.pill.warn{color:var(--warn);border-color:currentColor}
+a{color:var(--accent)}
+.log{font:12px ui-monospace,Menlo,monospace;color:var(--muted);margin-top:10px;max-height:120px;overflow:auto;white-space:pre-wrap}
+.row{grid-template-columns:auto 1fr auto auto auto}
+.up{font-variant-numeric:tabular-nums;font-size:13px;font-weight:600;min-width:58px;text-align:right}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.kpi{border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.kpi .v{font-size:24px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.kpi .l{color:var(--muted);font-size:12px}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:left;padding:8px 6px;border-top:1px solid var(--line)}
+th{color:var(--muted);font-weight:500;font-size:12px;border-top:0}
+td.n{text-align:right;font-variant-numeric:tabular-nums}
+.empty{color:var(--muted);font-size:13px;padding:6px 0}
+.days{display:flex;gap:1px;height:26px;margin:4px 0 2px}
+.days i{flex:1;border-radius:2px;background:var(--line)}
+.days i.ok{background:var(--ok)}.days i.warn{background:var(--warn)}.days i.bad{background:var(--bad)}
+.dayrow{padding:8px 0;border-top:1px solid var(--line)}.dayrow:first-child{border-top:0}
+.dayrow .top{display:flex;justify-content:space-between;font-size:14px}
+.dayrow .ends{display:flex;justify-content:space-between;font-size:11px;color:var(--muted)}
+h3.sec{font-size:13px;color:var(--muted);font-weight:600;margin:18px 0 6px;text-transform:uppercase;letter-spacing:.04em}
+.axis{font-size:11px;fill:var(--muted)}
+.setup{border:1px dashed var(--line);border-radius:12px;padding:12px 14px;font-size:14px}
+.setup code{font-size:12px}
+.simbar{display:none;position:sticky;top:0;z-index:5;background:var(--warn);color:#1b1300;font-weight:600;padding:10px 16px;text-align:center;font-size:14px}
+.simbar button{margin-left:10px;padding:5px 10px;background:#1b1300;color:#fff}
+body.sim .simbar{display:block}
+body:not(.owner) .owner-only{display:none!important}
+.hchart{width:100%;height:140px;display:block;margin-top:10px}
+.legend{display:flex;gap:14px;font-size:12px;color:var(--muted);margin-top:6px}
+.legend span{display:flex;align-items:center;gap:6px}
+@media (max-width:560px){.row{grid-template-columns:auto 1fr auto auto}.spark{display:none}td.hide,th.hide{display:none}}
+.og { position: relative; touch-action: none; cursor: crosshair; }
+.og svg { display: block; width: 100%; height: 140px; overflow: visible; }
+.og svg text { fill: var(--muted); font-size: 11px; }
+.og-area { fill: var(--accent); opacity: .18; }
+.og-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
+.og-base, .og-grid { stroke: var(--line, rgba(127,127,127,.3)); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.og-grid { stroke-dasharray: 3 3; }
+.og-cross { stroke: var(--muted); stroke-width: 1; }
+.og-tip { position: absolute; top: -6px; white-space: nowrap; padding: 3px 8px; border-radius: 6px; background: var(--text, #eee); color: var(--bg, #111); font-size: 12px; font-weight: 600; pointer-events: none; }
+.og-tip[hidden] { display: none; }
+.hl { margin-top: 6px; max-height: 260px; overflow-y: auto; }
+
+.back{font-size:13px;text-decoration:none}
+.kpi .v small{font-size:13px;font-weight:600;color:var(--muted);margin-left:2px}
+.kpi .l .dot{display:inline-block;width:8px;height:8px;margin-right:4px;vertical-align:1px}
+.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
+.chart h3{margin:0;font-size:14px}.chart .sub{margin:2px 0 4px}
+.ev{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line);font-size:14px}
+.ev:first-child{border-top:0}.ev time{color:var(--muted);font-size:12px;white-space:nowrap}
+.syncgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.off{padding:14px;border-radius:12px;background:color-mix(in srgb,var(--bad) 12%,transparent);margin-bottom:16px;display:none;font-weight:500}
+body.down .off{display:block}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <a class="back" href="./">← GN Status</a>
+      <h1>GN 2.0 Server</h1>
+      <div class="sub">Live view of data.learnresearch.org: cloud saves, the Firebase sync, play counts and the backup game source. <span id="updated"></span></div>
+    </div>
+    <div class="overall"><span class="dot" id="overallDot"></span><span id="overallText">Checking…</span></div>
+  </header>
+
+  <div class="off" id="offNote">The server isn't answering. Cloud saves are going to Firebase until it's back, and nobody loses progress.</div>
+
+  <section>
+    <h2>Right now <span class="sub" id="uptimeSpan"></span></h2>
+    <div class="kpis" id="kpis"><div class="empty">Loading…</div></div>
+  </section>
+
+  <section>
+    <h2>Response time <span class="sub">from this browser, checked every 5 seconds</span></h2>
+    <div id="pingChart"><div class="empty">Measuring…</div></div>
+  </section>
+
+  <section>
+    <h2>Last 24 hours <span class="sub">per minute, from the server</span></h2>
+    <div class="charts">
+      <div class="chart"><h3>Requests</h3><div class="sub" id="reqNote"></div><div id="reqChart"><div class="empty">Loading…</div></div></div>
+      <div class="chart"><h3>Data sent</h3><div class="sub" id="bytesNote"></div><div id="bytesChart"><div class="empty">Loading…</div></div></div>
+      <div class="chart"><h3>Cloud save requests</h3><div class="sub" id="savesNote"></div><div id="savesChart"><div class="empty">Loading…</div></div></div>
+      <div class="chart"><h3>Time to answer</h3><div class="sub" id="msNote"></div><div id="msChart"><div class="empty">Loading…</div></div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Firebase sync <span class="sub" id="syncWhen"></span></h2>
+    <div class="syncgrid" id="sync"><div class="empty">Loading…</div></div>
+  </section>
+
+  <section>
+    <h2>Most played today <span class="sub">on GN 2.0, counted by the server</span></h2>
+    <div id="plays"><div class="empty">Loading…</div></div>
+  </section>
+
+  <section>
+    <h2>Recent events</h2>
+    <div id="events"><div class="empty">Loading…</div></div>
+  </section>
+</main>
+<script>
+const API = "https://data.learnresearch.org";
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const size = b => b == null ? "–" : b >= 1e9 ? (b / 1e9).toFixed(1) + " GB" : b >= 1e6 ? (b / 1e6).toFixed(1) + " MB" : b >= 1e3 ? (b / 1e3).toFixed(0) + " KB" : b + " B";
+const num = n => n == null ? "–" : Number(n).toLocaleString();
+const dur = s => s < 60 ? Math.round(s) + "s" : s < 3600 ? Math.round(s / 60) + "m" : s < 86400 ? Math.floor(s / 3600) + "h " + Math.round(s % 3600 / 60) + "m" : Math.floor(s / 86400) + "d " + Math.floor(s % 86400 / 3600) + "h";
+const ago = t => { const s = (Date.now() - t) / 1000; return s < 60 ? "just now" : dur(s) + " ago"; };
+const tm = t => new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+
+async function get(path, ms = 8000) {
+  const ctrl = new AbortController(), timer = setTimeout(() => ctrl.abort(), ms), t0 = performance.now();
+  try {
+    const res = await fetch(API + path + (path.includes("?") ? "&" : "?") + "t=" + Date.now(), { cache: "no-store", signal: ctrl.signal });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return { data: await res.json(), ms: performance.now() - t0 };
+  } finally { clearTimeout(timer); }
+}
+
+/* One series per chart, so no legend: the heading names it. Hover shows the value. */
+function chart(el, points, { label, fmt = num, slotMs = 60000, windowMs = 86400000, startLabel = "24 h ago" }) {
+  if (!points.length) { el.innerHTML = '<div class="empty">No data yet. The server records a point every minute.</div>'; return; }
+  const W = 800, H = 140, T = 8, B = 22, ph = H - T - B, now = Date.now(), start = now - windowMs;
+  const N = Math.round(windowMs / slotMs), slots = new Array(N).fill(null);
+  for (const p of points) { const i = Math.floor((p.t - start) / slotMs); if (i >= 0 && i < N) slots[i] = (slots[i] || 0) + p.v; }
+  const vals = slots.map(v => v || 0), peak = Math.max(...vals), max = peak > 0 ? peak * 1.15 : 1;
+  const x = i => (i + .5) / N * W, y = v => T + ph - v / max * ph;
+  const line = "M" + vals.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("L");
+  el.innerHTML = `<div class="og"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${esc(label)}, peak ${esc(fmt(peak))}">
+    <line x1="0" x2="${W}" y1="${T + ph}" y2="${T + ph}" class="og-base"/>${peak > 0 ? `<line x1="0" x2="${W}" y1="${y(peak).toFixed(1)}" y2="${y(peak).toFixed(1)}" class="og-grid"/>` : ""}
+    <path d="${line}L${x(N - 1)},${T + ph}L${x(0)},${T + ph}Z" class="og-area"/><path d="${line}" class="og-line" vector-effect="non-scaling-stroke"/>
+    <line class="og-cross" x1="0" x2="0" y1="${T}" y2="${T + ph}" vector-effect="non-scaling-stroke" visibility="hidden"/>
+    <text x="0" y="${H - 6}">${startLabel}</text><text x="${W}" y="${H - 6}" text-anchor="end">Now</text></svg><span class="og-tip" hidden></span></div>`;
+  const box = el.querySelector(".og"), cross = el.querySelector(".og-cross"), tip = el.querySelector(".og-tip");
+  box.onpointermove = box.onpointerdown = ev => {
+    const r = box.getBoundingClientRect(), i = Math.min(N - 1, Math.max(0, Math.floor((ev.clientX - r.left) / r.width * N)));
+    cross.setAttribute("x1", x(i)); cross.setAttribute("x2", x(i)); cross.setAttribute("visibility", "visible");
+    tip.hidden = false;
+    tip.textContent = `${tm(start + i * slotMs)} · ${slots[i] == null ? "no data" : fmt(slots[i]) + " " + label}`;
+    tip.style.left = Math.min(Math.max(0, x(i) / W * r.width - tip.offsetWidth / 2), r.width - tip.offsetWidth) + "px";
+  };
+  box.onpointerleave = () => { tip.hidden = true; cross.setAttribute("visibility", "hidden"); };
+  return peak;
+}
+
+/* ---------- Live ping ---------- */
+const pings = [];   // { t, v (ms) | null when it failed }
+let lastOk = null, state = "loading";
+async function ping() {
+  let ms = null;
+  try { const r = await get("/health", 6000); if (r.data && r.data.ok) ms = r.ms; } catch {}
+  pings.push({ t: Date.now(), v: ms });
+  while (pings.length && Date.now() - pings[0].t > 5 * 60000) pings.shift();
+  if (ms != null) lastOk = Date.now();
+  const recent = pings.slice(-3), fails = recent.filter(p => p.v == null).length;
+  state = ms == null && fails >= 2 ? "down" : ms == null ? "slow" : ms > 1500 ? "slow" : "ok";
+  const txt = { ok: "Online", slow: ms == null ? "Not answering…" : "Slow", down: "Offline" }[state];
+  $("#overallDot").className = "dot " + (state === "ok" ? "ok" : state === "slow" ? "warn" : "bad");
+  $("#overallText").textContent = txt + (ms != null ? ` · ${Math.round(ms)} ms` : lastOk ? ` · last seen ${ago(lastOk)}` : "");
+  document.body.classList.toggle("down", state === "down");
+  document.title = (state === "ok" ? "" : state === "slow" ? "⚠ " : "✖ ") + "GN 2.0 Server · GN Status";
+  chart($("#pingChart"), pings.filter(p => p.v != null).map(p => ({ t: p.t, v: Math.round(p.v) })), { label: "ms", slotMs: 5000, windowMs: 5 * 60000, startLabel: "5 min ago" });
+}
+
+/* ---------- Status ---------- */
+let gameNames = null;
+async function loadNames() {
+  try {
+    const r = await fetch("https://cdn.jsdelivr.net/gh/freebuisness/assets@main/zones.json");
+    const list = await r.json();
+    gameNames = Object.fromEntries(list.map(z => [String(z.id), z.name]));
+  } catch { gameNames = {}; }
+}
+async function loadStatus() {
+  let s;
+  try { s = (await get("/api/status")).data; } catch { return; }
+  $("#updated").textContent = "Updated " + new Date().toLocaleTimeString();
+  $("#uptimeSpan").textContent = "Server up for " + dur(s.uptime);
+  const sys = s.system || {}, disk = sys.disk;
+  const lm = s.lastMinute || {};
+  const k = [
+    ["Players with cloud saves", num(s.players)],
+    ["Cloud save storage", size(s.saveBytes)],
+    ["Plays today", num(s.playsToday)],
+    ["Requests last minute", num(lm.req || 0)],
+    ["Game files cached", `${num(s.cacheFiles)}<small>${size(s.cacheBytes)}</small>`],
+    ["Disk free", disk ? `${size(disk.free)}<small>of ${size(disk.total)}</small>` : "–"],
+    ["Memory used", sys.memTotal ? `${Math.round(sys.memUsed / sys.memTotal * 100)}%<small>${size(sys.memUsed)}</small>` : "–"],
+    ["CPU load", sys.load != null ? `${Math.round(sys.load / (sys.cpus || 1) * 100)}%<small>${sys.cpus} cores</small>` : "–"]
+  ];
+  $("#kpis").innerHTML = k.map(([l, v]) => `<div class="kpi"><div class="v">${v}</div><div class="l">${esc(l)}</div></div>`).join("");
+
+  const y = s.sync || {};
+  const next = y.lastSync && y.everyMs ? y.lastSync + y.everyMs : null;
+  const okRes = /^ok/.test(y.lastResult || "");
+  $("#syncWhen").textContent = y.running ? "Syncing now…" : y.lastSync ? `Last ${ago(y.lastSync)}` + (next ? ` · next in about ${dur(Math.max(0, (next - Date.now()) / 1000))}` : "") : "";
+  $("#sync").innerHTML = !y.enabled
+    ? `<div class="empty">Off: the server doesn't have its Firebase key.</div>`
+    : [
+      ["Status", `<span class="pill ${y.running ? "" : okRes ? "ok" : "warn"}">${y.running ? "Running" : okRes ? "OK" : "Needs a look"}</span>`],
+      ["Last result", esc(y.lastResult || "–")],
+      ["Pieces sent to Firebase", num(y.partsUp)],
+      ["Pieces pulled from Firebase", num(y.partsDown)]
+    ].map(([l, v]) => `<div class="kpi"><div class="l">${l}</div><div style="margin-top:4px;font-weight:600">${v}</div></div>`).join("");
+
+  const evs = s.events || [];
+  const icon = { start: "ok", sync: "ok", backup: "ok", warn: "warn" };
+  $("#events").innerHTML = evs.length ? evs.map(e => `<div class="ev"><span class="dot ${icon[e.kind] || ""}"></span><span>${esc(e.text)}</span><time>${ago(e.t)}</time></div>`).join("") : '<div class="empty">Nothing yet.</div>';
+}
+
+/* ---------- History ---------- */
+async function loadHistory() {
+  let h;
+  try { h = (await get("/api/history")).data; } catch { return; }
+  const pts = h.points || [];
+  const sum = k => pts.reduce((n, p) => n + (p[k] || 0), 0);
+  const series = k => pts.map(p => ({ t: p.t, v: p[k] || 0 }));
+  chart($("#reqChart"), series("req"), { label: "requests" });
+  $("#reqNote").textContent = `${num(sum("req"))} in 24 h · ${num(sum("errors"))} errors`;
+  chart($("#bytesChart"), series("bytes"), { label: "sent", fmt: size });
+  $("#bytesNote").textContent = `${size(sum("bytes"))} in 24 h`;
+  chart($("#savesChart"), series("saves"), { label: "save requests" });
+  $("#savesNote").textContent = `${num(sum("saves"))} in 24 h`;
+  chart($("#msChart"), pts.filter(p => p.req).map(p => ({ t: p.t, v: p.ms })), { label: "ms average" });
+  const busy = pts.filter(p => p.req);
+  $("#msNote").textContent = busy.length ? `${Math.round(busy.reduce((n, p) => n + p.ms * p.req, 0) / sum("req"))} ms average` : "";
+}
+
+/* ---------- Plays ---------- */
+async function loadPlays() {
+  let p;
+  try { p = (await get("/api/plays?period=day")).data; } catch { return; }
+  if (!gameNames) await loadNames();
+  const top = Object.entries(p).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  $("#plays").innerHTML = top.length
+    ? `<table><tr><th>Game</th><th style="text-align:right">Plays</th></tr>${top.map(([id, n]) => `<tr><td>${esc(gameNames[id] || "Game " + id)}</td><td class="n">${num(n)}</td></tr>`).join("")}</table>`
+    : '<div class="empty">No plays counted yet today.</div>';
+}
+
+ping(); loadStatus(); loadHistory(); loadPlays();
+setInterval(() => { if (!document.hidden) ping(); }, 5000);
+setInterval(() => { if (!document.hidden) loadStatus(); }, 10000);
+setInterval(() => { if (!document.hidden) { loadHistory(); loadPlays(); } }, 60000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { ping(); loadStatus(); } });
+</script>
+</body>
+</html>
