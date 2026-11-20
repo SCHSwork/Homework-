@@ -110,6 +110,12 @@ body:not(.owner) .owner-only{display:none!important}
     <div class="kpis" id="kpis"></div>
   </section>
 
+  <section id="homeServer">
+    <h2><span style="display:flex;align-items:center;gap:8px"><span class="dot" id="homeDot"></span>GN 2.0 Server</span><a class="sub" href="server.html">Live server page →</a></h2>
+    <div class="sub" style="margin-bottom:10px">Lincoln's own server (data.learnresearch.org): cloud saves, Live Save, online counts and the backup game source. Tracked on its own, because GN 2.0 keeps working without it: when it's off, everything switches to Firebase.</div>
+    <div class="kpis" id="homeKpis"><div class="empty">Checking…</div></div>
+  </section>
+
   <section>
     <h2>People online <span class="sub">GN 2.0, last 24 hours</span></h2>
     <div id="online"><div class="empty">Loading…</div></div>
@@ -225,8 +231,13 @@ const SERVICES = [
   { id:"fs",     name:"Saves & live updates (Firestore)", url:"https://firestore.googleapis.com/", cors:false },
   { id:"auth",   name:"Sign-in (Firebase Auth)", url:"https://identitytoolkit.googleapis.com/", cors:false },
   { id:"famobi", name:"Partner games (Famobi)", url:"https://img.cdn.famobi.com/favicon.ico", cors:false },
-  { id:"pg",     name:"Partner games (Playgama)", url:"https://playgama.com/favicon.ico", cors:false }
+  { id:"pg",     name:"Partner games (Playgama)", url:"https://playgama.com/favicon.ico", cors:false },
+  // Lincoln's own server: cloud saves, Live Save, online counts, backup game source.
+  // Tracked on its own (separate): GN 2.0 keeps working without it, so it doesn't
+  // count toward "All services" or the overall status.
+  { id:"home",   name:"GN 2.0 Server",         url:"https://data.learnresearch.org/health", cors:true, separate:true }
 ];
+const MAIN_SERVICES = SERVICES.filter(s => !s.separate);
 // jsDelivr blocks every repo of these GitHub accounts, so GN 2.0 loads their files
 // from GitHub instead (JSD_REFUSED_OWNERS in SCHSwork/math js/app.js). Checked the same way here.
 const JSD_BLOCKED_OWNERS = ["genizy", "gn-math", "tty67hlt6jf6"];
@@ -341,7 +352,8 @@ async function checkAll() {
   renderKpis(hist);
   if ($("#srcSel").value === "browser") renderLongterm();
 
-  const bad = results.filter(r => r.s === "bad").length, slow = results.filter(r => r.s === "warn").length;
+  const mainRes = results.filter((r, i) => !SERVICES[i].separate);
+  const bad = mainRes.filter(r => r.s === "bad").length, slow = mainRes.filter(r => r.s === "warn").length;
   const siteDown = results[0].s === "bad" || results[1].s === "bad";
   const listDown = results.slice(2, 5).every(r => r.s === "bad");
   let cls = "ok", txt = "All systems normal";
@@ -442,7 +454,7 @@ setInterval(() => { if (!document.hidden) loadHealth(); }, 30 * 60000);
 
 /* ---------- Overview ---------- */
 function renderKpis(hist) {
-  const all = SERVICES.flatMap(s => hist[s.id] || []);
+  const all = MAIN_SERVICES.flatMap(s => hist[s.id] || []);
   const sites = [...(hist.site || []), ...(hist.light || [])];
   const okMs = all.filter(p => p.s !== "bad").map(p => p.ms);
   const first = Math.min(...all.map(p => p.t));
@@ -457,7 +469,44 @@ function renderKpis(hist) {
   ];
   $("#kpis").innerHTML = k.map(([l, v, c]) => `<div class="kpi"><div class="v" ${c ? `style="color:${c}"` : ""}>${v}</div><div class="l">${l}</div></div>`).join("");
   $("#uptimeSpan").textContent = isFinite(first) ? "since " + fmtTime(first) : "";
+  renderHomeServer(hist);
 }
+
+/* ---------- GN 2.0 Server (its own uptime) ---------- */
+let homeLive = null;   // the server's own /api/status
+async function loadHomeLive() {
+  try { const r = await timedFetch("https://data.learnresearch.org/api/status"); homeLive = r.res.ok ? JSON.parse(r.text) : null; } catch { homeLive = null; }
+  renderHomeServer(store.get("gn-status-hist", {}));
+}
+function renderHomeServer(hist) {
+  const el = $("#homeKpis");
+  if (!el) return;
+  const h = hist.home || [], last = h[h.length - 1];
+  let m; try { m = server || browserModel(); } catch { m = browserModel(); }
+  const up = d => { const u = windowUptime(m, "home", d); return u == null && d === 1 ? uptime(h) : u; };
+  const down = last && last.s === "bad";
+  $("#homeDot").className = "dot " + (!last ? "" : down ? "bad" : last.s === "warn" ? "warn" : "ok");
+  // How long it's been up (or down): back to the last check with the other state
+  let since = null;
+  if (last) { for (let i = h.length - 1; i >= 0; i--) { if ((h[i].s === "bad") !== down) break; since = h[i].t; } }
+  const pct = u => u == null ? "–" : (u >= 99.995 ? "100" : u.toFixed(2)) + "%";
+  const k = [
+    [down ? "Down for" : "Up for", since ? dur(Date.now() - since) + (h.length && since === h[0].t ? "+" : "") : "–", down ? "var(--bad)" : "var(--ok)"],
+    ["Uptime, 24 h", pct(up(1)), upColor(up(1))],
+    ["Uptime, 7 days", pct(up(7)), upColor(up(7))],
+    ["Uptime, 30 days", pct(up(30)), upColor(up(30))],
+    ["Response", last && !down ? Math.round(last.ms) + " ms" : "–"],
+    ["Outages, 30 days", m.incidents.filter(i => i.id === "home" && i.start > Date.now() - 30 * 864e5).length]
+  ];
+  if (homeLive) k.push(
+    ["Online via server", (homeLive.onlineHere ?? 0).toLocaleString()],
+    ["Live Saves today", (homeLive.liveSaves ? homeLive.liveSaves.today : 0).toLocaleString()],
+    ["Server running for", dur((homeLive.uptime || 0) * 1000) + (homeLive.version ? ` <small style="font-size:12px;font-weight:400;color:var(--muted)">v${esc(homeLive.version)}</small>` : "")]
+  );
+  el.innerHTML = k.map(([l, v, c]) => `<div class="kpi"><div class="v" ${c ? `style="color:${c}"` : ""}>${v}</div><div class="l">${l}</div></div>`).join("");
+}
+loadHomeLive();
+setInterval(() => { if (!document.hidden) loadHomeLive(); }, 60000);
 
 /* ---------- Incidents ---------- */
 function trackIncidents(results) {
@@ -615,7 +664,7 @@ function renderLongterm() {
   const kpi = (l, v) => `<div class="kpi"><div class="v" style="font-size:18px">${v}</div><div class="l">${l}</div></div>`;
   const records = [
     kpi("Sites up streak", dur(streak)),
-    kpi("Downtime, 7 days (all services)", downtime(m.incidents, null, 7) ? dur(downtime(m.incidents, null, 7)) : "none"),
+    kpi("Downtime, 7 days (all services)", (() => { const d = downtime(m.incidents.filter(i => i.id !== "home"), null, 7); return d ? dur(d) : "none"; })()),
     kpi("Downtime, 30 days (sites)", (() => { const d = downtime(m.incidents, "site", 30) + downtime(m.incidents, "light", 30); return d ? dur(d) : "none"; })()),
     kpi("Longest outage", longest ? `${dur(longest.d)} <small style="font-size:12px;font-weight:400;color:var(--muted)">${esc(longest.name)}</small>` : "none"),
     kpi("Avg time to recover", closed.length ? dur(closed.reduce((a, i) => a + i.end - i.start, 0) / closed.length) : "–"),

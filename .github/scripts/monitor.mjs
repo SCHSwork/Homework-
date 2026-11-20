@@ -25,7 +25,10 @@ const SERVICES = [
   { id: "fs",     name: "Saves & live updates (Firestore)", url: "https://firestore.googleapis.com/", any: true },
   { id: "auth",   name: "Sign-in (Firebase Auth)", url: "https://identitytoolkit.googleapis.com/", any: true },
   { id: "famobi", name: "Partner games (Famobi)",  url: "https://img.cdn.famobi.com/favicon.ico" },
-  { id: "pg",     name: "Partner games (Playgama)", url: "https://playgama.com/favicon.ico", any: true }
+  { id: "pg",     name: "Partner games (Playgama)", url: "https://playgama.com/favicon.ico", any: true },
+  // Lincoln's own server (cloud saves, Live Save, online counts). Tracked on its own:
+  // the site keeps working without it, so it isn't part of "all services".
+  { id: "home",   name: "GN 2.0 Server", url: "https://data.learnresearch.org/health", separate: true }
 ];
 // jsDelivr blocks every repo of these accounts; GN 2.0 loads them from GitHub (JSD_REFUSED_OWNERS in SCHSwork/math)
 const JSD_BLOCKED_OWNERS = ["genizy", "gn-math", "tty67hlt6jf6"];
