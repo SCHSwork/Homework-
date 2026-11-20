@@ -244,6 +244,7 @@ async function loadStatus() {
     ["Players with cloud saves", num(s.players)],
     ["Cloud save storage", size(s.saveBytes)],
     ["Plays today", num(s.playsToday)],
+    ["Live Saves today", s.liveSaves ? `${num(s.liveSaves.today)}<small>${num(s.liveSaves.toFirebase)} sent to Firebase</small>` : "–"],
     ["Requests last minute", num(lm.req || 0)],
     ["Game files cached", `${num(s.cacheFiles)}<small>${size(s.cacheBytes)}</small>`],
     ["Disk free", disk ? `${size(disk.free)}<small>of ${size(disk.total)}</small>` : "–"],
