@@ -248,7 +248,7 @@ const probeUrl = (repo, sha, path) => JSD_BLOCKED_OWNERS.includes(repo.split("/"
   ? `https://raw.githubusercontent.com/${repo}/${sha}/${path}` : `https://cdn.jsdelivr.net/gh/${repo}@${sha}/${path}`;
 
 const REPOS = ["SCHSwork/math", "SCHSwork/gn-light", "SCHSwork/GN-originals", "SCHSwork/Single-file-gn-2.0", "SCHSwork/Homework-"];
-const HIST_MAX = 1440, SLOW_MS = 1500, TIMEOUT_MS = 10000, INTERVAL_S = 60;
+const HIST_MAX = 1440, SLOW_MS = 1500, TIMEOUT_MS = 10000, INTERVAL_S = 60, MIN_GAP_MS = 55000;
 
 let SIM = null; // { target, kind, left }
 const ns = k => (SIM ? "sim:" : "") + k;
@@ -340,7 +340,12 @@ async function checkAll() {
   const hist = store.get("gn-status-hist", {});
   const daily = store.get("gn-daily", {});
   SERVICES.forEach((s, i) => {
-    (hist[s.id] ||= []).push({ ...results[i], t: Date.now() });
+    const h = hist[s.id] ||= [], prev = h[h.length - 1];
+    // Refreshing (or "Check now") within a minute of the last recorded check
+    // updates that check instead of adding one, so spamming refresh, say
+    // during a restart, can't pile up checks and skew uptime and response times
+    if (prev && Date.now() - prev.t < MIN_GAP_MS) { h[h.length - 1] = { ...results[i], t: prev.t }; return; }
+    h.push({ ...results[i], t: Date.now() });
     const drop = hist[s.id].slice(0, Math.max(0, hist[s.id].length - HIST_MAX));
     drop.forEach(p => {
       const d = dayKey(p.t), r = ((daily[d] ||= {})[s.id] ||= { n: 0, up: 0, slow: 0, sum: 0, min: null, max: null });
@@ -391,9 +396,15 @@ let activeUsers = null, onlineHist = [];
 async function fetchActiveUsers() {
   const P = "gn-math-dfd85", K = "AIzaSyCVUtHKcMZCs7aaCcO_Gp8fmy41MZnjqcs";
   try {
-    const res = await fetch(`https://firestore.googleapis.com/v1/projects/${P}/databases/(default)/documents/live/now?key=${K}`);
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    const f = (await res.json()).fields || {};
+    // Reused for 2 minutes (it only changes every 5), so refreshing doesn't use up Firestore reads
+    let f, c = store.get("gn-live-cache", null);
+    if (c && Date.now() - c.at < 120000) f = c.f;
+    else {
+      const res = await fetch(`https://firestore.googleapis.com/v1/projects/${P}/databases/(default)/documents/live/now?key=${K}`);
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      f = (await res.json()).fields || {};
+      store.set("gn-live-cache", { at: Date.now(), f });
+    }
     const at = Date.parse(f.at?.timestampValue || 0) || 0;
     // A count older than 15 minutes means nobody's had the site open since
     activeUsers = Date.now() - at < 15 * 60000 ? Number(f.online?.integerValue || 0) : 0;

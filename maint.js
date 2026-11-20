@@ -7,13 +7,19 @@
 let gnMaint = null;
 const MAINT_GRACE_MS = 30 * 60000;
 async function loadMaint() {
+  // Reused for 45 seconds, so refreshing doesn't use up Firestore reads
+  try {
+    const c = JSON.parse(localStorage.getItem("gn-maint-cache") || "null");
+    if (c && Date.now() - c.at < 45000) { gnMaint = c.m; return; }
+  } catch {}
   try {
     const r = await fetch("https://firestore.googleapis.com/v1/projects/gn-math-dfd85/databases/(default)/documents/siteStatus/maintenance?key=AIzaSyCVUtHKcMZCs7aaCcO_Gp8fmy41MZnjqcs", { cache: "no-store" });
-    if (r.status === 404) { gnMaint = null; return; }
+    if (r.status === 404) { gnMaint = null; try { localStorage.setItem("gn-maint-cache", JSON.stringify({ at: Date.now(), m: null })); } catch {} return; }
     if (!r.ok) return;
     const f = (await r.json()).fields || {};
     const start = Date.parse(f.start?.timestampValue || 0) || 0, until = Date.parse(f.until?.timestampValue || 0) || 0;
     gnMaint = until > start ? { start, until, note: f.note?.stringValue || "" } : null;
+    try { localStorage.setItem("gn-maint-cache", JSON.stringify({ at: Date.now(), m: gnMaint })); } catch {}
   } catch {}
 }
 function maintNow() { const m = gnMaint; return m && Date.now() >= m.start && Date.now() <= m.until + MAINT_GRACE_MS ? m : null; }
