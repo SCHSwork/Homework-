@@ -144,6 +144,12 @@ body.down .off{display:block}
   </section>
 
   <section>
+    <h2>Games not loading for players <span class="sub" id="ghWhen"></span></h2>
+    <div class="sub" style="margin-bottom:8px">When a game crashes or never starts for someone, their browser tells the server. A game is flagged when 3 or more people hit it in a day and it fails for at least a quarter of its plays. Flagged games show "Not loading for many" on their card.</div>
+    <div id="gameHealth"><div class="empty">Loading…</div></div>
+  </section>
+
+  <section>
     <h2>Most played today <span class="sub">on GN 2.0, counted by the server</span></h2>
     <div id="plays"><div class="empty">Loading…</div></div>
   </section>
@@ -234,6 +240,7 @@ async function loadStatus() {
   const sys = s.system || {}, disk = sys.disk;
   const lm = s.lastMinute || {};
   const k = [
+    ["Online now", s.online != null ? `${num(s.online)}<small>${num(s.onlineHere)} via server</small>` : "–"],
     ["Players with cloud saves", num(s.players)],
     ["Cloud save storage", size(s.saveBytes)],
     ["Plays today", num(s.playsToday)],
@@ -281,6 +288,19 @@ async function loadHistory() {
   $("#msNote").textContent = busy.length ? `${Math.round(busy.reduce((n, p) => n + p.ms * p.req, 0) / sum("req"))} ms average` : "";
 }
 
+/* ---------- Games not loading ---------- */
+async function loadGameHealth() {
+  let h;
+  try { h = (await get("/api/game-health")).data; } catch { return; }
+  if (!gameNames) await loadNames();
+  const name = id => esc(gameNames[id] || "Game " + id);
+  const kinds = k => Object.entries(k || {}).map(([x, n]) => `${n} ${({ start: "never started", stopped: "stopped", crash: "crashed", load: "didn't load" })[x] || x}`).join(", ");
+  const row = (g, cls) => `<div class="row"><span class="dot ${cls}"></span><div class="name"><a href="https://schswork.github.io/math/?id=${encodeURIComponent(g.id)}" target="_blank" rel="noopener">${name(g.id)}</a><small>${g.people} ${g.people === 1 ? "person" : "people"} · ${kinds(g.kinds)}${g.lastMsg ? " · " + esc(g.lastMsg.slice(0, 120)) : ""}</small></div><span class="pill ${cls === "bad" ? "bad" : ""}">${g.plays ? Math.round(g.rate * 100) + "% of plays" : "no plays counted"}</span><span class="ms">${ago(g.lastAt)}</span></div>`;
+  $("#ghWhen").textContent = h.flagged.length ? `${h.flagged.length} flagged` : "none flagged";
+  $("#gameHealth").innerHTML = (h.flagged.length ? h.flagged.map(g => row(g, "bad")).join("") : '<div class="empty">No games are flagged right now.</div>')
+    + (h.watching.length ? `<h3 class="sec">Had a problem, not flagged yet</h3>` + h.watching.slice(0, 10).map(g => row(g, "warn")).join("") : "");
+}
+
 /* ---------- Plays ---------- */
 async function loadPlays() {
   let p;
@@ -292,10 +312,10 @@ async function loadPlays() {
     : '<div class="empty">No plays counted yet today.</div>';
 }
 
-ping(); loadStatus(); loadHistory(); loadPlays();
+ping(); loadStatus(); loadHistory(); loadPlays(); loadGameHealth();
 setInterval(() => { if (!document.hidden) ping(); }, 5000);
 setInterval(() => { if (!document.hidden) loadStatus(); }, 10000);
-setInterval(() => { if (!document.hidden) { loadHistory(); loadPlays(); } }, 60000);
+setInterval(() => { if (!document.hidden) { loadHistory(); loadPlays(); loadGameHealth(); } }, 60000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) { ping(); loadStatus(); } });
 </script>
 </body>
