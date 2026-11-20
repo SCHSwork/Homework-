@@ -489,7 +489,7 @@ function renderHomeServer(hist) {
   // How long it's been up (or down): back to the last check with the other state
   // This browser's own checks only go back to when you opened the page, so
   // they're the last resort. Up: since the last recorded outage ended, but no
-  // earlier than the server's own restart. Down: since the open outage began.
+  // earlier than the PC started. Down: since the open outage began.
   let since = null;
   if (last) { for (let i = h.length - 1; i >= 0; i--) { if ((h[i].s === "bad") !== down) break; since = h[i].t; } }
   const homeInc = m.incidents.filter(i => i.id === "home");
@@ -498,8 +498,10 @@ function renderHomeServer(hist) {
     if (open) since = Math.min(since || Infinity, open.start);
   } else if (last) {
     const lastDownEnd = Math.max(0, ...homeInc.map(i => i.end || 0));
-    const restart = homeLive && homeLive.uptime ? Date.now() - homeLive.uptime * 1000 : 0;
-    const best = Math.max(lastDownEnd, restart);
+    // The PC's own start (not the server program's: updates restart it for a
+    // few seconds, which isn't an outage)
+    const boot = homeLive && homeLive.system && homeLive.system.hostUptime ? Date.now() - homeLive.system.hostUptime * 1000 : 0;
+    const best = Math.max(lastDownEnd, boot);
     if (best) since = best;
   }
   const pct = u => u == null ? "–" : (u >= 99.995 ? "100" : u.toFixed(2)) + "%";
@@ -514,7 +516,7 @@ function renderHomeServer(hist) {
   if (homeLive) k.push(
     ["Online via server", (homeLive.onlineHere ?? 0).toLocaleString()],
     ["Live Saves today", (homeLive.liveSaves ? homeLive.liveSaves.today : 0).toLocaleString()],
-    ["Server running for", dur((homeLive.uptime || 0) * 1000) + (homeLive.version ? ` <small style="font-size:12px;font-weight:400;color:var(--muted)">v${esc(homeLive.version)}</small>` : "")]
+    ["Last update installed", dur((homeLive.uptime || 0) * 1000) + (homeLive.version ? ` <small style="font-size:12px;font-weight:400;color:var(--muted)">v${esc(homeLive.version)}</small>` : "")]
   );
   el.innerHTML = k.map(([l, v, c]) => `<div class="kpi"><div class="v" ${c ? `style="color:${c}"` : ""}>${v}</div><div class="l">${l}</div></div>`).join("");
 }
