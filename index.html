@@ -516,7 +516,7 @@ function renderHomeServer(hist) {
   if (homeLive) k.push(
     ["Online via server", (homeLive.onlineHere ?? 0).toLocaleString()],
     ["Live Saves today", (homeLive.liveSaves ? homeLive.liveSaves.today : 0).toLocaleString()],
-    ["Last update installed", dur((homeLive.uptime || 0) * 1000) + (homeLive.version ? ` <small style="font-size:12px;font-weight:400;color:var(--muted)">v${esc(homeLive.version)}</small>` : "")]
+    ["Last update installed", dur((homeLive.uptime || 0) * 1000) + " ago" + (homeLive.version ? ` <small style="font-size:12px;font-weight:400;color:var(--muted)">v${esc(homeLive.version)}</small>` : "")]
   );
   el.innerHTML = k.map(([l, v, c]) => `<div class="kpi"><div class="v" ${c ? `style="color:${c}"` : ""}>${v}</div><div class="l">${l}</div></div>`).join("");
 }
