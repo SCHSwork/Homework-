@@ -285,6 +285,12 @@ async function loadStatus() {
     ["Memory used", sys.memTotal ? `${Math.round(sys.memUsed / sys.memTotal * 100)}%<small>${size(sys.memUsed)} of ${size(sys.memTotal)}</small>` : "–"],
     ["CPU load", sys.load != null ? `${Math.round(sys.load / (sys.cpus || 1) * 100)}%<small>across ${sys.cpus} cores</small>` : "–"]
   ];
+  // Full copy of the game library (every repo the games come from)
+  const mi = s.mirror;
+  if (mi) k.push(["Library copy", mi.repos ? `${num(mi.ok)} repos<small>${size(mi.bytes)}${mi.running && mi.progress ? ` · copying ${num(mi.progress.done)} of ${num(mi.progress.of)}` : mi.stoppedFor === "disk" ? " · paused, disk nearly full" : mi.failed ? ` · ${num(mi.failed)} couldn't be copied` : " · up to date"}</small>` : `${mi.running ? "Starting" : "Not yet"}<small>the first copy starts a few minutes after an update</small>`]);
+  // Nightly save backup copied off the PC (Cloudflare R2)
+  const of = s.offsite;
+  if (of) k.push(["Off-PC save backup", of.err ? `Failing<small>${esc(of.err)}</small>` : of.lastOk ? `On<small>last copied ${ago(of.lastOk)}</small>` : of.configured ? "Set up<small>first copy coming soon</small>" : "Not set up<small>backups are only on the PC</small>"]);
   // The small gray detail goes on its own line under the label, not squeezed next to the number
   $("#kpis").innerHTML = k.map(([l, v]) => { const [main, det] = String(v).split("<small>"); return `<div class="kpi"><div class="v">${main}</div><div class="l">${esc(l)}</div>${det ? `<div class="d">${det.replace("</small>", "")}</div>` : ""}</div>`; }).join("");
 
