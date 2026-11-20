@@ -331,6 +331,17 @@ async function checkOne(s) {
 }
 
 let checking = false;
+// Clean up checks that piled up from refreshing before this fix: keep one per minute
+(function compactHistory() {
+  const hist = store.get("gn-status-hist", {});
+  let changed = false;
+  for (const id of Object.keys(hist)) {
+    const out = [];
+    for (const p of hist[id]) { const prev = out[out.length - 1]; if (prev && p.t - prev.t < MIN_GAP_MS) { out[out.length - 1] = { ...p, t: prev.t }; changed = true; } else out.push(p); }
+    hist[id] = out;
+  }
+  if (changed) store.set("gn-status-hist", hist);
+})();
 async function checkAll() {
   if (checking) return; checking = true;
   $("#recheck").disabled = true;
