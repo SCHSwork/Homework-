@@ -273,7 +273,7 @@ const upColor = u => u == null ? "var(--muted)" : u >= 99 ? "var(--ok)" : u >= 9
 const dayKey = t => new Date(t).toISOString().slice(0, 10);
 const esc = t => String(t ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
 const fmtTime = t => new Date(t).toLocaleString([], { month:"short", day:"numeric", hour:"numeric", minute:"2-digit" });
-const dur = ms => { const m = Math.round(ms / 60000); return m < 1 ? "<1 min" : m < 60 ? m + " min" : (m / 60).toFixed(1) + " h"; };
+const dur = ms => { const m = Math.round(ms / 60000); if (m < 1) return "under a minute"; if (m < 60) return m + " min"; const h = Math.floor(m / 60); if (h < 48) return h + "h " + (m % 60) + "m"; return Math.floor(h / 24) + "d " + (h % 24) + "h"; };
 function renderServices() {
   const hist = store.get("gn-status-hist", {});
   $("#services").innerHTML = SERVICES.map(s => {
@@ -487,11 +487,24 @@ function renderHomeServer(hist) {
   const down = last && last.s === "bad";
   $("#homeDot").className = "dot " + (!last ? "" : down ? "bad" : last.s === "warn" ? "warn" : "ok");
   // How long it's been up (or down): back to the last check with the other state
+  // This browser's own checks only go back to when you opened the page, so
+  // they're the last resort. Up: since the last recorded outage ended, but no
+  // earlier than the server's own restart. Down: since the open outage began.
   let since = null;
   if (last) { for (let i = h.length - 1; i >= 0; i--) { if ((h[i].s === "bad") !== down) break; since = h[i].t; } }
+  const homeInc = m.incidents.filter(i => i.id === "home");
+  if (down) {
+    const open = homeInc.filter(i => !i.end).sort((a, b) => a.start - b.start)[0];
+    if (open) since = Math.min(since || Infinity, open.start);
+  } else if (last) {
+    const lastDownEnd = Math.max(0, ...homeInc.map(i => i.end || 0));
+    const restart = homeLive && homeLive.uptime ? Date.now() - homeLive.uptime * 1000 : 0;
+    const best = Math.max(lastDownEnd, restart);
+    if (best) since = best;
+  }
   const pct = u => u == null ? "–" : (u >= 99.995 ? "100" : u.toFixed(2)) + "%";
   const k = [
-    [down ? "Down for" : "Up for", since ? dur(Date.now() - since) + (h.length && since === h[0].t ? "+" : "") : "–", down ? "var(--bad)" : "var(--ok)"],
+    [down ? "Down for" : "Up for", since ? dur(Date.now() - since) : "–", down ? "var(--bad)" : "var(--ok)"],
     ["Uptime, 24 h", pct(up(1)), upColor(up(1))],
     ["Uptime, 7 days", pct(up(7)), upColor(up(7))],
     ["Uptime, 30 days", pct(up(30)), upColor(up(30))],

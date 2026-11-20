@@ -96,7 +96,8 @@ body:not(.owner) .owner-only{display:none!important}
 .back{font-size:13px;text-decoration:none}
 .saved{padding:12px 14px;border-radius:12px;background:color-mix(in srgb,var(--warn) 14%,transparent);margin-bottom:16px;font-weight:500}
 .axisrow{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:2px}
-.kpi .v small{font-size:13px;font-weight:600;color:var(--muted);margin-left:2px}
+.kpi{min-width:0;overflow-wrap:anywhere}
+.kpi .d{color:var(--muted);font-size:12px;margin-top:2px;padding-top:4px;border-top:1px dashed var(--line)}
 .kpi .l .dot{display:inline-block;width:8px;height:8px;margin-right:4px;vertical-align:1px}
 .charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
 .chart h3{margin:0;font-size:14px}.chart .sub{margin:2px 0 4px}
@@ -273,18 +274,19 @@ async function loadStatus() {
   const sys = s.system || {}, disk = sys.disk;
   const lm = s.lastMinute || {};
   const k = [
-    ["Online now", s.online != null ? `${num(s.online)}<small>${num(s.onlineHere)} via server</small>` : "–"],
+    ["Online now", s.online != null ? `${num(s.online)}<small>${num(s.onlineHere)} of them through this server</small>` : "–"],
     ["Players with cloud saves", num(s.players)],
     ["Cloud save storage", size(s.saveBytes)],
     ["Plays today", num(s.playsToday)],
-    ["Live Saves today", s.liveSaves ? `${num(s.liveSaves.today)}<small>${num(s.liveSaves.toFirebase)} sent to Firebase</small>` : "–"],
+    ["Live Saves today", s.liveSaves ? `${num(s.liveSaves.today)}<small>${num(s.liveSaves.toFirebase)} passed on to Firebase</small>` : "–"],
     ["Requests last minute", num(lm.req || 0)],
-    ["Game files cached", `${num(s.cacheFiles)}<small>${size(s.cacheBytes)}</small>`],
-    ["Disk free", disk ? `${size(disk.free)}<small>of ${size(disk.total)}</small>` : "–"],
-    ["Memory used", sys.memTotal ? `${Math.round(sys.memUsed / sys.memTotal * 100)}%<small>${size(sys.memUsed)}</small>` : "–"],
-    ["CPU load", sys.load != null ? `${Math.round(sys.load / (sys.cpus || 1) * 100)}%<small>${sys.cpus} cores</small>` : "–"]
+    ["Game files cached", `${num(s.cacheFiles)}<small>${size(s.cacheBytes)} in total</small>`],
+    ["Disk free", disk ? `${size(disk.free)}<small>out of ${size(disk.total)}</small>` : "–"],
+    ["Memory used", sys.memTotal ? `${Math.round(sys.memUsed / sys.memTotal * 100)}%<small>${size(sys.memUsed)} of ${size(sys.memTotal)}</small>` : "–"],
+    ["CPU load", sys.load != null ? `${Math.round(sys.load / (sys.cpus || 1) * 100)}%<small>across ${sys.cpus} cores</small>` : "–"]
   ];
-  $("#kpis").innerHTML = k.map(([l, v]) => `<div class="kpi"><div class="v">${v}</div><div class="l">${esc(l)}</div></div>`).join("");
+  // The small gray detail goes on its own line under the label, not squeezed next to the number
+  $("#kpis").innerHTML = k.map(([l, v]) => { const [main, det] = String(v).split("<small>"); return `<div class="kpi"><div class="v">${main}</div><div class="l">${esc(l)}</div>${det ? `<div class="d">${det.replace("</small>", "")}</div>` : ""}</div>`; }).join("");
 
   const y = s.sync || {};
   const next = y.lastSync && y.everyMs ? y.lastSync + y.everyMs : null;
