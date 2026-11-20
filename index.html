@@ -22,7 +22,7 @@ h2{font-size:16px;margin:0 0 12px;display:flex;align-items:center;justify-conten
 .overall{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:999px;background:var(--panel);border:1px solid var(--line);font-weight:600}
 .dot{width:10px;height:10px;border-radius:50%;background:var(--idle);flex:none}
 .dot.ok{background:var(--ok);box-shadow:0 0 0 4px color-mix(in srgb,var(--ok) 20%,transparent)}
-.dot.warn{background:var(--warn)}.dot.bad{background:var(--bad)}
+.dot.warn,.dot.maint{background:var(--warn)}.dot.bad{background:var(--bad)}
 section{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:16px}
 .row{display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
 .row:first-of-type{border-top:0}
@@ -30,7 +30,7 @@ section{background:var(--panel);border:1px solid var(--line);border-radius:14px;
 .ms{font-variant-numeric:tabular-nums;color:var(--muted);font-size:13px;text-align:right;min-width:62px}
 .spark{display:flex;gap:2px;align-items:flex-end;height:22px}
 .spark i{width:4px;border-radius:1px;background:var(--idle);opacity:.85}
-.spark i.ok{background:var(--ok)}.spark i.warn{background:var(--warn)}.spark i.bad{background:var(--bad)}
+.spark i.ok{background:var(--ok)}.spark i.warn,.spark i.maint{background:var(--warn)}.spark i.bad{background:var(--bad)}
 button{font:inherit;font-weight:600;border:0;border-radius:10px;padding:9px 14px;background:var(--accent);color:#fff;cursor:pointer}
 button.ghost{background:transparent;color:var(--text);border:1px solid var(--line)}
 button:disabled{opacity:.5;cursor:default}
@@ -92,6 +92,7 @@ body:not(.owner) .owner-only{display:none!important}
 .og-tip { position: absolute; top: -6px; white-space: nowrap; padding: 3px 8px; border-radius: 6px; background: var(--text, #eee); color: var(--bg, #111); font-size: 12px; font-weight: 600; pointer-events: none; }
 .og-tip[hidden] { display: none; }
 .hl { margin-top: 6px; max-height: 260px; overflow-y: auto; }
+.maint{padding:12px 14px;border-radius:12px;background:color-mix(in srgb,var(--warn) 16%,transparent);margin-bottom:12px;font-weight:500}
 </style>
 </head>
 <body>
@@ -113,6 +114,7 @@ body:not(.owner) .owner-only{display:none!important}
   <section id="homeServer">
     <h2><span style="display:flex;align-items:center;gap:8px"><span class="dot" id="homeDot"></span>GN 2.0 Server</span><a class="sub" href="server.html">Live server page →</a></h2>
     <div class="sub" style="margin-bottom:10px">Lincoln's own server (data.learnresearch.org): cloud saves, Live Save, online counts and the backup game source. Tracked on its own, because GN 2.0 keeps working without it: when it's off, everything switches to Firebase.</div>
+    <div class="maint" id="homeMaint" hidden></div>
     <div class="kpis" id="homeKpis"><div class="empty">Checking…</div></div>
   </section>
 
@@ -200,6 +202,7 @@ body:not(.owner) .owner-only{display:none!important}
   <div class="sub" style="text-align:center">Checks run in your browser from your network, so a "down" result can also mean your network blocks that host.</div>
 </main>
 
+<script src="maint.js"></script>
 <script>
 const SITES = {
   // ready: the game cards each site draws once its game list has arrived
@@ -280,8 +283,8 @@ function renderServices() {
     const h = hist[s.id] || [];
     const last = h[h.length - 1];
     const state = last ? last.s : "";
-    const ms = last ? (last.s === "bad" || (last.s === "warn" && last.e) ? (last.e || "down") : Math.round(last.ms) + " ms") : "…";
-    const bars = h.slice(-30).map(p => `<i class="${p.s}" style="height:${p.s === "bad" ? 22 : Math.max(4, Math.min(22, p.ms / 80))}px"></i>`).join("");
+    const ms = last ? last.s === "maint" ? "maintenance" : (last.s === "bad" || (last.s === "warn" && last.e) ? (last.e || "down") : Math.round(last.ms) + " ms") : "…";
+    const bars = h.slice(-30).map(p => `<i class="${p.s}" style="height:${p.s === "bad" || p.s === "maint" ? 22 : Math.max(4, Math.min(22, p.ms / 80))}px"></i>`).join("");
     return `<div class="row"><span class="dot ${state}"></span>
       <div class="name">${s.name}<small>${s.probes ? (last && last.n ? last.n + (last.n === 1 ? " repo" : " repos") + " · " : "") + "game files" : new URL(s.url).host}</small></div>
       <div class="spark" title="Last 30 checks">${bars}</div>
@@ -331,7 +334,9 @@ let checking = false;
 async function checkAll() {
   if (checking) return; checking = true;
   $("#recheck").disabled = true;
-  const results = await Promise.all(SERVICES.map(checkOne));
+  const [results] = await Promise.all([Promise.all(SERVICES.map(checkOne)), loadMaint()]);
+  // Planned maintenance: the GN 2.0 Server being off is expected, not an outage
+  SERVICES.forEach((s, i) => { if (s.id === "home" && results[i].s === "bad" && maintNow()) results[i] = { ...results[i], s: "maint", e: "maintenance" }; });
   const hist = store.get("gn-status-hist", {});
   const daily = store.get("gn-daily", {});
   SERVICES.forEach((s, i) => {
@@ -485,7 +490,12 @@ function renderHomeServer(hist) {
   let m; try { m = server || browserModel(); } catch { m = browserModel(); }
   const up = d => { const u = windowUptime(m, "home", d); return u == null && d === 1 ? uptime(h) : u; };
   const down = last && last.s === "bad";
-  $("#homeDot").className = "dot " + (!last ? "" : down ? "bad" : last.s === "warn" ? "warn" : "ok");
+  const inMaint = last && last.s === "maint";
+  $("#homeDot").className = "dot " + (!last ? "" : down ? "bad" : last.s === "warn" || inMaint ? "warn" : "ok");
+  const mn = $("#homeMaint"), mm = inMaint ? maintNow() : null, mu = maintUpcoming();
+  mn.hidden = !(mm || mu);
+  if (mm) mn.textContent = `Down for maintenance, ${maintBackIn(mm)}.` + (mm.note ? " " + mm.note : "");
+  else if (mu) mn.textContent = `Planned maintenance ${maintWhen(mu)}.` + (mu.note ? " " + mu.note : "");
   // How long it's been up (or down): back to the last check with the other state
   // This browser's own checks only go back to when you opened the page, so
   // they're the last resort. Up: since the last recorded outage ended, but no
@@ -506,7 +516,7 @@ function renderHomeServer(hist) {
   }
   const pct = u => u == null ? "–" : (u >= 99.995 ? "100" : u.toFixed(2)) + "%";
   const k = [
-    [down ? "Down for" : "Up for", since ? dur(Date.now() - since) : "–", down ? "var(--bad)" : "var(--ok)"],
+    inMaint ? ["Maintenance", mm ? maintBackIn(mm).replace("should be back", "Back") : "–", "var(--warn)"] : [down ? "Down for" : "Up for", since ? dur(Date.now() - since) : "–", down ? "var(--bad)" : "var(--ok)"],
     ["Uptime, 24 h", pct(up(1)), upColor(up(1))],
     ["Uptime, 7 days", pct(up(7)), upColor(up(7))],
     ["Uptime, 30 days", pct(up(30)), upColor(up(30))],
@@ -565,7 +575,7 @@ async function loadServer() {
   try {
     const get = f => fetch(DATA_URL + f + "?_=" + Math.floor(Date.now() / 300000), { cache: "no-store" }).then(r => r.ok ? r.json() : Promise.reject(r.status));
     const [raw, daily, incidents, library, meta] = await Promise.all(["raw.json", "daily.json", "incidents.json", "library.json", "meta.json"].map(get));
-    const STATE = ["ok", "warn", "bad"];
+    const STATE = ["ok", "warn", "bad", "maint"];   // 3 = down for planned maintenance
     const series = {};
     for (const [t, row] of raw.checks) for (const [id, [st, ms]] of Object.entries(row)) (series[id] ||= []).push({ t, s: STATE[st], ms });
     server = { series, daily, incidents, library, since: meta.first, last: meta.last, runs: meta.runs };

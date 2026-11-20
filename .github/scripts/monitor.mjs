@@ -85,10 +85,11 @@ async function check(s) {
 function rollup(checks, id) {
   const pts = checks.map(c => c[1][id]).filter(Boolean);
   if (!pts.length) return null;
-  const okMs = pts.filter(p => p[0] !== 2).map(p => p[1]).sort((a, b) => a - b);
+  // 3 = down for planned maintenance: not an outage, but no response time either
+  const okMs = pts.filter(p => p[0] !== 2 && p[0] !== 3).map(p => p[1]).sort((a, b) => a - b);
   const q = f => okMs.length ? okMs[Math.min(okMs.length - 1, Math.floor(f * okMs.length))] : null;
   return {
-    n: pts.length, up: okMs.length, slow: pts.filter(p => p[0] === 1).length,
+    n: pts.length, up: pts.filter(p => p[0] !== 2).length, maint: pts.filter(p => p[0] === 3).length, slow: pts.filter(p => p[0] === 1).length,
     avg: okMs.length ? Math.round(okMs.reduce((a, b) => a + b, 0) / okMs.length) : null,
     min: okMs[0] ?? null, max: okMs[okMs.length - 1] ?? null, p50: q(0.5), p95: q(0.95)
   };
@@ -96,6 +97,18 @@ function rollup(checks, id) {
 
 const now = Date.now();
 const results = await Promise.all(SERVICES.map(check));
+
+// Planned maintenance (set in GN 2.0's Owner Panel, Firestore siteStatus/maintenance):
+// the GN 2.0 Server being off then is recorded as 3 (maintenance), not as down.
+try {
+  const r = await fetch("https://firestore.googleapis.com/v1/projects/gn-math-dfd85/databases/(default)/documents/siteStatus/maintenance?key=AIzaSyCVUtHKcMZCs7aaCcO_Gp8fmy41MZnjqcs", { signal: AbortSignal.timeout(TIMEOUT_MS) });
+  if (r.ok) {
+    const f = (await r.json()).fields || {};
+    const start = Date.parse(f.start?.timestampValue || 0) || 0, until = Date.parse(f.until?.timestampValue || 0) || 0;
+    const t = Date.now();
+    SERVICES.forEach((s, i) => { if (s.separate && results[i].s === 2 && t >= start && t <= until + 30 * 60000) results[i] = { ...results[i], s: 3, e: "maintenance" }; });
+  }
+} catch {}
 
 // Raw checks (last 7 days): [time, { id: [state 0 ok/1 slow/2 down, ms] }]
 const raw = read("raw.json", { checks: [] });

@@ -106,6 +106,7 @@ body:not(.owner) .owner-only{display:none!important}
 .syncgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
 .off{padding:14px;border-radius:12px;background:color-mix(in srgb,var(--bad) 12%,transparent);margin-bottom:16px;display:none;font-weight:500}
 body.down .off{display:block}
+.maint{padding:14px;border-radius:12px;background:color-mix(in srgb,var(--warn) 16%,transparent);margin-bottom:16px;font-weight:500}
 </style>
 </head>
 <body>
@@ -119,6 +120,7 @@ body.down .off{display:block}
     <div class="overall"><span class="dot" id="overallDot"></span><span id="overallText">Checking…</span></div>
   </header>
 
+  <div class="maint" id="maintNote" hidden></div>
   <div class="off" id="offNote">The server isn't answering. Cloud saves are going to Firebase until it's back, and nobody loses progress.</div>
   <div class="saved" id="savedNote" hidden></div>
 
@@ -181,6 +183,7 @@ body.down .off{display:block}
     <div id="events"><div class="empty">Loading…</div></div>
   </section>
 </main>
+<script src="maint.js"></script>
 <script>
 const API = "https://data.learnresearch.org";
 const $ = s => document.querySelector(s);
@@ -267,11 +270,18 @@ async function ping() {
   if (ms != null) lastOk = Date.now();
   const recent = pings.slice(-3), fails = recent.filter(p => p.v == null).length;
   state = ms == null && fails >= 2 ? "down" : ms == null ? "slow" : ms > 1500 ? "slow" : "ok";
-  const txt = { ok: "Online", slow: ms == null ? "Not answering…" : "Slow", down: "Offline" }[state];
-  $("#overallDot").className = "dot " + (state === "ok" ? "ok" : state === "slow" ? "warn" : "bad");
+  // Planned maintenance: amber instead of red while the server is off
+  const mm = maintNow(), mu = maintUpcoming();
+  if (state === "down" && mm) state = "maint";
+  const txt = { ok: "Online", slow: ms == null ? "Not answering…" : "Slow", down: "Offline", maint: "Down for maintenance" }[state];
+  $("#overallDot").className = "dot " + (state === "ok" ? "ok" : state === "slow" || state === "maint" ? "warn" : "bad");
+  const mn = $("#maintNote");
+  mn.hidden = !(state === "maint" || mu);
+  if (state === "maint") mn.textContent = `The server is down for maintenance and ${maintBackIn(mm)}. Cloud saves are going to Firebase until then, and nobody loses progress.` + (mm.note ? " " + mm.note : "");
+  else if (mu) mn.textContent = `Planned maintenance ${maintWhen(mu)}. Cloud saves will go to Firebase while it's off.` + (mu.note ? " " + mu.note : "");
   $("#overallText").textContent = txt + (ms != null ? ` · ${Math.round(ms)} ms` : lastOk ? ` · last seen ${ago(lastOk)}` : "");
   document.body.classList.toggle("down", state === "down");
-  document.title = (state === "ok" ? "" : state === "slow" ? "⚠ " : "✖ ") + "GN 2.0 Server · GN Status";
+  document.title = (state === "ok" ? "" : state === "slow" || state === "maint" ? "⚠ " : "✖ ") + "GN 2.0 Server · GN Status";
   chart($("#pingChart"), pings.filter(p => p.v != null).map(p => ({ t: p.t, v: Math.round(p.v) })), { label: "ms", slotMs: 5000, windowMs: 5 * 60000, startLabel: "5 min ago" });
 }
 
@@ -409,6 +419,7 @@ async function loadPlays() {
     : '<div class="empty">No plays counted yet today.</div>';
 }
 
+loadMaint(); setInterval(loadMaint, 60000);
 ping(); loadStatus(); loadHistory(); loadPlays(); loadGameHealth(); loadReach();
 setInterval(() => { if (!document.hidden) ping(); }, 5000);
 setInterval(() => { if (!document.hidden) loadStatus(); }, 10000);
