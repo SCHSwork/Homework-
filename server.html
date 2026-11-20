@@ -230,7 +230,7 @@ async function loadStatus() {
   let s;
   try { s = (await get("/api/status")).data; } catch { return; }
   $("#updated").textContent = "Updated " + new Date().toLocaleTimeString();
-  $("#uptimeSpan").textContent = "Server up for " + dur(s.uptime);
+  $("#uptimeSpan").textContent = "Server up for " + dur(s.uptime) + (s.version ? " · version " + s.version : "");
   const sys = s.system || {}, disk = sys.disk;
   const lm = s.lastMinute || {};
   const k = [
