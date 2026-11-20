@@ -94,6 +94,7 @@ body:not(.owner) .owner-only{display:none!important}
 .hl { margin-top: 6px; max-height: 260px; overflow-y: auto; }
 
 .back{font-size:13px;text-decoration:none}
+.saved{padding:12px 14px;border-radius:12px;background:color-mix(in srgb,var(--warn) 14%,transparent);margin-bottom:16px;font-weight:500}
 .axisrow{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:2px}
 .kpi .v small{font-size:13px;font-weight:600;color:var(--muted);margin-left:2px}
 .kpi .l .dot{display:inline-block;width:8px;height:8px;margin-right:4px;vertical-align:1px}
@@ -118,6 +119,7 @@ body.down .off{display:block}
   </header>
 
   <div class="off" id="offNote">The server isn't answering. Cloud saves are going to Firebase until it's back, and nobody loses progress.</div>
+  <div class="saved" id="savedNote" hidden></div>
 
   <section>
     <h2>Right now <span class="sub" id="uptimeSpan"></span></h2>
@@ -170,7 +172,37 @@ const dur = s => s < 60 ? Math.round(s) + "s" : s < 3600 ? Math.round(s / 60) + 
 const ago = t => { const s = (Date.now() - t) / 1000; return s < 60 ? "just now" : dur(s) + " ago"; };
 const tm = t => new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
+// When the server can't be reached, the last stats the GitHub status monitor
+// saved (every 10 minutes, off Lincoln's PC) are shown instead.
+const SAVED_URL = "https://raw.githubusercontent.com/SCHSwork/Homework-/status-data/server-latest.json";
+let saved = null, savedAt = 0;
+async function savedCopy() {
+  if (saved && Date.now() - savedAt < 5 * 60000) return saved;
+  try { const r = await fetch(SAVED_URL + "?_=" + Math.floor(Date.now() / 60000), { cache: "no-store" }); if (r.ok) { saved = await r.json(); savedAt = Date.now(); } } catch {}
+  return saved;
+}
+const SAVED_PART = { "/api/status": "status", "/api/history": "history", "/api/game-health": "gameHealth", "/api/plays?period=day": "plays" };
+let usingSaved = false;
+function showSavedNote() {
+  const el = $("#savedNote");
+  if (!el) return;
+  el.hidden = !usingSaved;
+  if (usingSaved && saved) el.textContent = `The server is offline, so these are the last stats saved ${ago(saved.at)} (${new Date(saved.at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}).`;
+}
 async function get(path, ms = 8000) {
+  try {
+    const r = await getLive(path, ms);
+    if (SAVED_PART[path] && usingSaved) { usingSaved = false; showSavedNote(); }
+    return r;
+  } catch (e) {
+    const part = SAVED_PART[path];
+    const s = part ? await savedCopy() : null;
+    if (!s || !s[part]) throw e;
+    usingSaved = true; showSavedNote();
+    return { data: s[part], ms: null, saved: true };
+  }
+}
+async function getLive(path, ms = 8000) {
   const ctrl = new AbortController(), timer = setTimeout(() => ctrl.abort(), ms), t0 = performance.now();
   try {
     const res = await fetch(API + path + (path.includes("?") ? "&" : "?") + "t=" + Date.now(), { cache: "no-store", signal: ctrl.signal });
@@ -236,8 +268,8 @@ async function loadNames() {
 async function loadStatus() {
   let s;
   try { s = (await get("/api/status")).data; } catch { return; }
-  $("#updated").textContent = "Updated " + new Date().toLocaleTimeString();
-  $("#uptimeSpan").textContent = "Server up for " + dur(s.uptime) + (s.version ? " · version " + s.version : "");
+  $("#updated").textContent = usingSaved ? "Showing the last saved stats." : "Updated " + new Date().toLocaleTimeString();
+  $("#uptimeSpan").textContent = (usingSaved ? "Was up for " : "Server up for ") + dur(s.uptime) + (s.version ? " · version " + s.version : "");
   const sys = s.system || {}, disk = sys.disk;
   const lm = s.lastMinute || {};
   const k = [
@@ -279,13 +311,13 @@ async function loadHistory() {
   const pts = h.points || [];
   const sum = k => pts.reduce((n, p) => n + (p[k] || 0), 0);
   const series = k => pts.map(p => ({ t: p.t, v: p[k] || 0 }));
-  chart($("#reqChart"), series("req"), { label: "requests" });
+  chart($("#reqChart"), series("req"), { label: "requests", slotMs: h.interval || 60000 });
   $("#reqNote").textContent = `${num(sum("req"))} in 24 h · ${num(sum("errors"))} errors`;
-  chart($("#bytesChart"), series("bytes"), { label: "sent", fmt: size });
+  chart($("#bytesChart"), series("bytes"), { label: "sent", fmt: size, slotMs: h.interval || 60000 });
   $("#bytesNote").textContent = `${size(sum("bytes"))} in 24 h`;
-  chart($("#savesChart"), series("saves"), { label: "save requests" });
+  chart($("#savesChart"), series("saves"), { label: "save requests", slotMs: h.interval || 60000 });
   $("#savesNote").textContent = `${num(sum("saves"))} in 24 h`;
-  chart($("#msChart"), pts.filter(p => p.req).map(p => ({ t: p.t, v: p.ms })), { label: "ms average" });
+  chart($("#msChart"), pts.filter(p => p.req).map(p => ({ t: p.t, v: p.ms })), { label: "ms average", slotMs: h.interval || 60000 });
   const busy = pts.filter(p => p.req);
   $("#msNote").textContent = busy.length ? `${Math.round(busy.reduce((n, p) => n + p.ms * p.req, 0) / sum("req"))} ms average` : "";
 }

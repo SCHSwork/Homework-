@@ -131,6 +131,41 @@ SERVICES.forEach((s, i) => {
 lib[day(now)] = today;
 write("library.json", lib);
 
+// GN 2.0 Server stats, saved here (off Lincoln's PC) so the server page can
+// still show the last known numbers when the server is off.
+//   server-latest.json  the newest status, last 24 h in 10-minute buckets, game health, today's plays
+//   server-daily.json   one summary per day, kept forever
+const homeIdx = SERVICES.findIndex(s => s.id === "home");
+if (homeIdx >= 0 && results[homeIdx].s !== 2) {
+  const get = async p => {
+    try { const r = await fetch("https://data.learnresearch.org" + p, { signal: AbortSignal.timeout(TIMEOUT_MS), headers: { "user-agent": "GN-Status-Monitor" } }); return r.ok ? await r.json() : null; }
+    catch { return null; }
+  };
+  const [status, hist, gameHealth, plays] = await Promise.all(["/api/status", "/api/history", "/api/game-health", "/api/plays?period=day"].map(get));
+  if (status) {
+    // Per-minute history added up into 10-minute buckets (keeps this file small)
+    const buckets = {};
+    for (const p of (hist && hist.points) || []) {
+      const t = Math.floor(p.t / 600000) * 600000, b = buckets[t] ||= { t, req: 0, saves: 0, gh: 0, plays: 0, beats: 0, bytes: 0, errors: 0, msSum: 0, online: 0 };
+      for (const k of ["req", "saves", "gh", "plays", "beats", "bytes", "errors"]) b[k] += p[k] || 0;
+      b.msSum += (p.ms || 0) * (p.req || 0); b.online = Math.max(b.online, p.online || 0);
+    }
+    const points = Object.values(buckets).sort((a, b) => a.t - b.t).map(({ msSum, ...b }) => ({ ...b, ms: b.req ? Math.round(msSum / b.req) : 0 }));
+    write("server-latest.json", { at: now, status, history: { interval: 600000, points }, gameHealth, plays });
+    const sd = read("server-daily.json", {});
+    const d = sd[day(now)] || {};
+    Object.assign(d, {
+      onlineMax: Math.max(d.onlineMax || 0, status.online || 0),
+      players: status.players, saveMB: Math.round((status.saveBytes || 0) / 1e5) / 10,
+      plays: status.playsToday, liveSaves: status.liveSaves ? status.liveSaves.today : null,
+      toFirebase: status.liveSaves ? status.liveSaves.toFirebase : null,
+      flagged: Math.max(d.flagged || 0, status.gamesFlagged || 0), version: status.version
+    });
+    sd[day(now)] = d;
+    write("server-daily.json", sd);
+  }
+}
+
 const meta = read("meta.json", {});
 write("meta.json", { first: meta.first || now, last: now, runs: (meta.runs || 0) + 1,
   names: Object.fromEntries(SERVICES.map(s => [s.id, s.name])) });
