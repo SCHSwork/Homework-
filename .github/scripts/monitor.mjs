@@ -28,7 +28,10 @@ const SERVICES = [
   { id: "pg",     name: "Partner games (Playgama)", url: "https://playgama.com/favicon.ico", any: true },
   // Lincoln's own server (cloud saves, Live Save, online counts). Tracked on its own:
   // the site keeps working without it, so it isn't part of "all services".
-  { id: "home",   name: "GN 2.0 Server", url: "https://data.learnresearch.org/health", separate: true }
+  { id: "home",   name: "GN 2.0 Server", url: "https://data.learnresearch.org/health", separate: true },
+  // GN Craft, the Minecraft server (Java address, through playit): a real Minecraft
+  // server-list ping from outside, so this checks what players see.
+  { id: "mc",     name: "GN Craft (Minecraft)", mc: "mc.learnresearch.org", separate: true }
 ];
 // jsDelivr blocks every repo of these accounts; GN 2.0 loads them from GitHub (JSD_REFUSED_OWNERS in SCHSwork/math)
 const JSD_BLOCKED_OWNERS = ["genizy", "gn-math", "tty67hlt6jf6"];
@@ -66,8 +69,34 @@ async function checkProbes(s) {
   return { s: ms > SLOW_MS * 2 ? 1 : 0, ms };
 }
 
+// Minecraft "server list ping" (looks up the _minecraft._tcp SRV record first, like the game)
+async function checkMc(s) {
+  const { default: net } = await import("node:net");
+  const { promises: dns } = await import("node:dns");
+  let host = s.mc, port = 25565;
+  try { const r = await dns.resolveSrv("_minecraft._tcp." + s.mc); if (r[0]) { host = r[0].name; port = r[0].port; } } catch {}
+  const t0 = performance.now();
+  return new Promise(resolve => {
+    const sock = net.connect(port, host); let buf = Buffer.alloc(0), done = false;
+    const finish = r => { if (!done) { done = true; sock.destroy(); resolve(r); } };
+    const varint = n => { const o = []; do { let b = n & 0x7f; n >>>= 7; if (n) b |= 0x80; o.push(b); } while (n); return Buffer.from(o); };
+    const packet = b => Buffer.concat([varint(b.length), b]);
+    sock.setTimeout(TIMEOUT_MS, () => finish({ s: 2, ms: TIMEOUT_MS, e: "timeout" }));
+    sock.on("error", e => finish({ s: 2, ms: Math.round(performance.now() - t0), e: e.code || "unreachable" }));
+    sock.on("connect", () => {
+      const a = Buffer.from(host), p = Buffer.alloc(2); p.writeUInt16BE(port);
+      sock.write(packet(Buffer.concat([varint(0), varint(767), varint(a.length), a, p, varint(1)])));
+      sock.write(packet(varint(0)));
+    });
+    sock.on("data", d => {
+      buf = Buffer.concat([buf, d]);
+      if (buf.length > 5 && buf.includes(0x7b)) { const ms = Math.round(performance.now() - t0); finish({ s: ms > SLOW_MS ? 1 : 0, ms }); }
+    });
+  });
+}
 async function check(s) {
   if (s.probes) return checkProbes(s);
+  if (s.mc) return checkMc(s);
   const t0 = performance.now();
   try {
     const r = await fetch(s.url + (s.url.includes("?") ? "&" : "?") + "_=" + Date.now(),

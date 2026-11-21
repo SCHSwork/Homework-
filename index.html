@@ -118,6 +118,11 @@ body:not(.owner) .owner-only{display:none!important}
     <div class="kpis" id="homeKpis"><div class="empty">Checking…</div></div>
   </section>
 
+  <section id="mcSection">
+    <h2><span style="display:flex;align-items:center;gap:8px"><span class="dot" id="mcDot"></span>GN Craft <span class="sub">Minecraft server</span></span><span class="sub" id="mcAddr"></span></h2>
+    <div class="kpis" id="mcKpis"><div class="empty">Checking…</div></div>
+  </section>
+
   <section>
     <h2>People online <span class="sub">GN 2.0, last 24 hours</span></h2>
     <div id="online"><div class="empty">Loading…</div></div>
@@ -239,7 +244,10 @@ const SERVICES = [
   // Lincoln's own server: cloud saves, Live Save, online counts, backup game source.
   // Tracked on its own (separate): GN 2.0 keeps working without it, so it doesn't
   // count toward "All services" or the overall status.
-  { id:"home",   name:"GN 2.0 Server",         url:"https://data.learnresearch.org/health", cors:true, separate:true }
+  { id:"home",   name:"GN 2.0 Server",         url:"https://data.learnresearch.org/health", cors:true, separate:true },
+  // GN Craft, the Minecraft server on the same PC (in AMP). Checked through the GN 2.0 Server,
+  // which pings it every 30 seconds. Also separate from the site's numbers.
+  { id:"mc",     name:"GN Craft (Minecraft)", url:"https://data.learnresearch.org/api/minecraft", cors:true, separate:true }
 ];
 const MAIN_SERVICES = SERVICES.filter(s => !s.separate);
 // jsDelivr blocks every repo of these GitHub accounts, so GN 2.0 loads their files
@@ -348,7 +356,7 @@ async function checkAll() {
   $("#recheck").disabled = true;
   const [results] = await Promise.all([Promise.all(SERVICES.map(checkOne)), loadMaint()]);
   // Planned maintenance: the GN 2.0 Server being off is expected, not an outage
-  SERVICES.forEach((s, i) => { if (s.id === "home" && results[i].s === "bad" && maintNow()) results[i] = { ...results[i], s: "maint", e: "maintenance" }; });
+  SERVICES.forEach((s, i) => { if ((s.id === "home" || s.id === "mc") && results[i].s === "bad" && maintNow()) results[i] = { ...results[i], s: "maint", e: "maintenance" }; });
   const hist = store.get("gn-status-hist", {});
   const daily = store.get("gn-daily", {});
   SERVICES.forEach((s, i) => {
@@ -559,6 +567,30 @@ function renderHomeServer(hist) {
     })()
   );
   el.innerHTML = k.map(([l, v, c]) => `<div class="kpi"><div class="v" ${c ? `style="color:${c}"` : ""}>${v}</div><div class="l">${l}</div></div>`).join("");
+  renderMc(hist, m);
+}
+
+/* ---------- GN Craft (Minecraft) ---------- */
+function renderMc(hist, m) {
+  const el = $("#mcKpis");
+  if (!el) return;
+  const h = hist.mc || [], last = h[h.length - 1], mc = homeLive && homeLive.mcServer;
+  const inMaint = last && last.s === "maint";
+  const up = mc ? mc.online : last ? last.s === "ok" || last.s === "warn" : null;
+  $("#mcDot").className = "dot " + (up == null ? "" : inMaint ? "warn" : up ? "ok" : "bad");
+  $("#mcAddr").textContent = "Java: mc.learnresearch.org";
+  const u = d => { const x = windowUptime(m, "mc", d); return x == null && d === 1 ? uptime(h) : x; };
+  const pct = x => x == null ? "–" : (x >= 99.995 ? "100" : x.toFixed(2)) + "%";
+  const small = t => ` <small style="display:block;font-size:12px;font-weight:400;color:var(--muted);margin-top:2px">${t}</small>`;
+  const k = [
+    up == null ? ["Status", "–"] : inMaint ? ["Status", "Maintenance", "var(--warn)"]
+      : up ? ["Up for", mc && mc.upSince ? dur(Date.now() - mc.upSince) : "Online", "var(--ok)"] : ["Status", "Offline", "var(--bad)"],
+    ["Players online", mc && mc.online ? `${mc.players} / ${mc.max}` + (mc.names && mc.names.length ? small(esc(mc.names.join(", "))) : "") : "–"],
+    ["Uptime, 24 h", pct(u(1)), upColor(u(1))],
+    ["Uptime, 7 days", pct(u(7)), upColor(u(7))],
+    ["Version", mc && mc.version ? esc(mc.version) : "–"]
+  ];
+  el.innerHTML = k.map(([l, v, c]) => `<div class="kpi"><div class="v" ${c ? `style="color:${c}"` : ""}>${v}</div><div class="l">${l}</div></div>`).join("");
 }
 loadHomeLive();
 setInterval(() => { if (!document.hidden) loadHomeLive(); }, 60000);
@@ -719,7 +751,7 @@ function renderLongterm() {
   const kpi = (l, v) => `<div class="kpi"><div class="v" style="font-size:18px">${v}</div><div class="l">${l}</div></div>`;
   const records = [
     kpi("Sites up streak", dur(streak)),
-    kpi("Downtime, 7 days (all services)", (() => { const d = downtime(m.incidents.filter(i => i.id !== "home"), null, 7); return d ? dur(d) : "none"; })()),
+    kpi("Downtime, 7 days (all services)", (() => { const d = downtime(m.incidents.filter(i => i.id !== "home" && i.id !== "mc"), null, 7); return d ? dur(d) : "none"; })()),
     kpi("Downtime, 30 days (sites)", (() => { const d = downtime(m.incidents, "site", 30) + downtime(m.incidents, "light", 30); return d ? dur(d) : "none"; })()),
     kpi("Longest outage", longest ? `${dur(longest.d)} <small style="font-size:12px;font-weight:400;color:var(--muted)">${esc(longest.name)}</small>` : "none"),
     kpi("Avg time to recover", closed.length ? dur(closed.reduce((a, i) => a + i.end - i.start, 0) / closed.length) : "–"),

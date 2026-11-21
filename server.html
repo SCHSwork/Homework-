@@ -324,6 +324,9 @@ async function loadStatus() {
   // Nightly save backup copied off the PC (Cloudflare R2)
   const of = s.offsite;
   if (of) k.push(["Off-PC save backup", of.err ? `Failing<small>${esc(of.err)}</small>` : of.lastOk ? `On<small>last copied ${ago(of.lastOk)}</small>` : of.configured ? "Set up<small>first copy coming soon</small>" : "Not set up<small>backups are only on the PC</small>"]);
+  // GN Craft (the Minecraft server on this PC)
+  const mc = s.mcServer;
+  if (mc && mc.checkedAt) k.push(["GN Craft (Minecraft)", mc.online ? `<span style="color:var(--ok)">${num(mc.players)} / ${num(mc.max)} on</span><small>${mc.names && mc.names.length ? esc(mc.names.join(", ")) + " · " : ""}${esc(mc.version || "")} · mc.learnresearch.org</small>` : `<span style="color:var(--bad)">Offline</span><small>${esc(mc.error || "not answering")}</small>`]);
   // Smaller downloads: compressed copies of game files
   const cz = s.compressed;
   if (cz) k.push(["Smaller downloads", `${num(cz.files)} files<small>${size(cz.savedBytes)} smaller in total${cz.waiting ? ` · ${num(cz.waiting)} waiting` : ""}</small>`]);
