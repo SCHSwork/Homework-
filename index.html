@@ -203,6 +203,7 @@ body:not(.owner) .owner-only{display:none!important}
 </main>
 
 <script src="maint.js"></script>
+<script src="version.js"></script>
 <script>
 const SITES = {
   // ready: the game cards each site draws once its game list has arrived
@@ -502,6 +503,7 @@ function renderKpis(hist) {
 /* ---------- GN 2.0 Server (its own uptime) ---------- */
 let homeLive = null;   // the server's own /api/status
 async function loadHomeLive() {
+  await loadLatestServerVer();
   try { const r = await timedFetch("https://data.learnresearch.org/api/status"); homeLive = r.res.ok ? JSON.parse(r.text) : null; } catch { homeLive = null; }
   renderHomeServer(store.get("gn-status-hist", {}));
 }
@@ -548,7 +550,13 @@ function renderHomeServer(hist) {
   if (homeLive) k.push(
     ["Online via server", (homeLive.onlineHere ?? 0).toLocaleString()],
     ["Live Saves today", (homeLive.liveSaves ? homeLive.liveSaves.today : 0).toLocaleString()],
-    ["Last update installed", dur((homeLive.uptime || 0) * 1000) + " ago" + (homeLive.version ? ` <small style="font-size:12px;font-weight:400;color:var(--muted)">v${esc(homeLive.version)}</small>` : "")]
+    (() => {
+      // Version: green when it matches the newest server code on GitHub, amber while an update waits to install
+      const vs = versionState(homeLive.version), inst = dur((homeLive.uptime || 0) * 1000) + " ago";
+      const small = t => ` <small style="display:block;font-size:12px;font-weight:400;color:var(--muted);margin-top:2px">${t}</small>`;
+      if (!vs) return ["Version", "–" + small("installed " + inst)];
+      return ["Version", vs.text + small(`v${esc(homeLive.version)} · installed ${inst}` + (vs.ok === false ? ` · newest is v${esc(latestServerVer)}, installs within about 5 min` : "")), vs.color];
+    })()
   );
   el.innerHTML = k.map(([l, v, c]) => `<div class="kpi"><div class="v" ${c ? `style="color:${c}"` : ""}>${v}</div><div class="l">${l}</div></div>`).join("");
 }

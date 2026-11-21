@@ -184,6 +184,7 @@ body.down .off{display:block}
   </section>
 </main>
 <script src="maint.js"></script>
+<script src="version.js"></script>
 <script>
 const API = "https://data.learnresearch.org";
 const $ = s => document.querySelector(s);
@@ -298,7 +299,11 @@ async function loadStatus() {
   let s;
   try { s = (await get("/api/status")).data; } catch { return; }
   $("#updated").textContent = usingSaved ? "Showing the last saved stats." : "Updated " + new Date().toLocaleTimeString();
-  $("#uptimeSpan").textContent = (usingSaved ? "Was up for " : "Server up for ") + dur(s.uptime) + (s.version ? " · version " + s.version : "");
+  await loadLatestServerVer();
+  const vs = versionState(s.version);
+  $("#uptimeSpan").innerHTML = esc((usingSaved ? "Was up for " : "Server up for ") + dur(s.uptime))
+    + (s.version ? ` · version ${esc(s.version)}` : "")
+    + (vs && vs.ok != null ? ` <span class="pill ${vs.ok ? "ok" : "warn"}">${vs.ok ? "Up to date" : `Update waiting (v${esc(latestServerVer)})`}</span>` : "");
   const sys = s.system || {}, disk = sys.disk;
   const lm = s.lastMinute || {};
   const k = [
